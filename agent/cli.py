@@ -25,6 +25,10 @@ def main() -> int:
 
     print("Learn Agent interactive shell")
     print("Type 'help' for built-in commands. Type 'exit' to quit.")
+    if agent.llm is None:
+        print("ANTHROPIC_API_KEY not found. Falling back to direct shell execution.")
+    else:
+        print("Anthropic LLM enabled with read_file, write_file, and git_run tools.")
 
     while True:
         try:

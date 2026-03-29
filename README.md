@@ -4,10 +4,17 @@ A Python-based AI agent project that uses the shell as its command interaction l
 
 `learn-agent` is intended as a lightweight starting point for building local agents that accept commands, execute shell tasks, manage basic session context, and return structured results. The repository is designed to be readable by both human developers and AI agents.
 
+When `ANTHROPIC_API_KEY` is configured, the agent routes user requests through Anthropic Claude and exposes three local tools:
+
+- `read_file`: read local files directly without approval
+- `write_file`: write local files after explicit human approval
+- `git_run`: execute git commands after explicit human approval
+
 ## Features
 
 - Python implementation with a simple CLI entrypoint
-- Shell-backed command execution
+- Anthropic Claude integration through the official Python SDK
+- Tool-based local file and git access
 - Session-oriented interaction loop
 - Clear separation between CLI, agent logic, and shell runner
 - Basic safety policy for dangerous shell commands
@@ -52,7 +59,19 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Run the agent
+### 3. Configure Anthropic
+
+```bash
+export ANTHROPIC_API_KEY=your_api_key
+```
+
+Optional:
+
+```bash
+export ANTHROPIC_MODEL=claude-sonnet-4-20250514
+```
+
+### 4. Run the agent
 
 ```bash
 python main.py
@@ -70,9 +89,11 @@ Inside the interactive shell:
 
 ```text
 agent> help
-agent> pwd
-agent> echo hello
-agent> ls
+agent> read the README and summarize it
+agent> create a file named notes.txt with three bullet points
+agent> yes
+agent> show me git status
+agent> no
 agent> exit
 ```
 
