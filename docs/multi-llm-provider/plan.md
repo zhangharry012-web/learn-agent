@@ -4,6 +4,8 @@
 
 将单一 `llm.py` 拆分为 `llm/` 包，引入统一消息格式兼容层，让上层 `core.py` 与具体 LLM API 格式完全解耦。保留 Anthropic 支持并加 `base_url`，新增 OpenAI 兼容客户端支持 DeepSeek 等任意兼容 API。通过工厂模式根据配置选择 provider。
 
+本轮仅更新方案文档，不开始实现。重点补齐统一消息格式约束、停止原因标准化、错误处理策略、`base_url` 约定、CLI 提示语义和测试验收标准，确保计划进入可实施状态。
+
 ## 目标文件结构
 
 ```
@@ -102,7 +104,7 @@ class ToolResult:
 class LLMResponse:
     text: str                    # 文本回复（可为空）
     tool_calls: List[ToolCall]   # 工具调用列表（可为空）
-    stop_reason: str             # "end_turn" / "tool_use"
+    stop_reason: str             # 标准化后的停止原因
 ```
 
 `core.py` 中的消息列表使用统一 dict 格式：
@@ -112,6 +114,18 @@ class LLMResponse:
 | `"user"` | `{role, content: str}` | 用户消息 |
 | `"assistant"` | `{role, text: str, tool_calls: List[ToolCall]}` | 助手消息 |
 | `"tool_result"` | `{role, results: List[ToolResult]}` | 工具执行结果 |
+
+#### 统一消息格式不变量
+
+为避免 provider 间转换歧义，统一层增加如下严格约束：
+
+1. `assistant` 消息允许同时包含 `text` 和 `tool_calls`。也就是说，一轮回复可以既输出自然语言，也发起工具调用。
+2. `assistant.tool_calls` 允许为空；为空时表示本轮没有工具调用。
+3. `tool_result` 只能出现在某条包含 `tool_calls` 的 `assistant` 消息之后，不能独立出现。
+4. 单条 `tool_result` 消息承载同一轮 assistant 发起的一个或多个工具执行结果。
+5. `ToolResult.tool_call_id` 必须与上一轮 assistant 中的某个 `ToolCall.id` 一一对应；不允许出现找不到上游调用的孤立结果。
+6. `tool_result.results` 不允许为部分未知集合；如果上层选择分批回填结果，必须保证每个结果都带有明确 `tool_call_id`，并由转换层原样保留。
+7. 统一层不保存 provider 原生 block/message 结构，避免 `core.py` 再次泄漏下层协议细节。
 
 ### `llm/base.py` — 抽象基类
 
@@ -143,6 +157,12 @@ class BaseLLMClient:
 | `_to_anthropic_tools()` | 统一 → Anthropic | 当前 `tools.py` 的 `definition()` 输出已兼容，直接透传 |
 | `_parse_response()` | Anthropic → 统一 | 遍历 content blocks，text → `LLMResponse.text`，tool_use → `ToolCall` |
 
+**停止原因标准化**：
+
+- Anthropic 原生 `stop_reason` 在 provider 层做标准化后写入 `LLMResponse.stop_reason`
+- 计划中的标准化目标值为：`end_turn`、`tool_use`、`max_tokens`、`other`
+- 未识别值不在 `core.py` 中特殊处理，但会落到 `other`
+
 ### `llm/openai_client.py` — OpenAI 兼容实现
 
 **构造函数**：接收 `api_key, model, max_tokens, base_url`，创建 `openai.OpenAI` 客户端。通过 `base_url` 支持 DeepSeek 等任意兼容 API。
@@ -154,6 +174,27 @@ class BaseLLMClient:
 | `_to_openai_messages()` | 统一 → OpenAI | `system_prompt` 插入为 `{role: "system"}` 消息；`tool_calls` 中 `arguments` 需 `json.dumps`；`tool_result` 拆为多条 `{role: "tool"}` 消息 |
 | `_to_openai_tools()` | 统一 → OpenAI | `input_schema` → `function.parameters`，外包 `{type: "function", function: {...}}` |
 | `_parse_response()` | OpenAI → 统一 | `choices[0].message` 解析；`tool_calls[].function.arguments` 需 `json.loads` |
+
+**停止原因标准化**：
+
+- OpenAI-compatible 的 `finish_reason` 统一映射到 `LLMResponse.stop_reason`
+- 建议映射：
+  - `stop` → `end_turn`
+  - `tool_calls` → `tool_use`
+  - `length` → `max_tokens`
+  - 其它未知值 → `other`
+
+**工具参数解析失败策略**：
+
+OpenAI-compatible 返回的 `tool_calls[].function.arguments` 需要 `json.loads`。这里必须定义受控失败策略，避免 provider 返回异常 JSON 时直接把系统拖垮。
+
+约定如下：
+
+1. provider 层尝试对 `arguments` 做 `json.loads`
+2. 若返回空字符串、非法 JSON、`null` 或非对象结构，视为协议错误
+3. provider 层抛出受控异常，例如 `ValueError("Invalid tool arguments from provider")`
+4. 上层不做静默兜底成 `{}`，避免执行错误工具参数
+5. 如需调试，可在异常信息或日志中保留原始 arguments 字符串，但不改变统一接口结构
 
 ### `llm/__init__.py` — 公共导出 + 工厂
 
@@ -191,6 +232,7 @@ def create_llm(*, provider, api_key, model, max_tokens=1024, base_url="") -> Bas
    - 从 `response` 提取 `ToolCall` 列表（而非遍历 content blocks）
    - 构建 `assistant_message` 为统一 dict 格式
    - 构建 `tool_result` 消息使用 `ToolResult` dataclass
+   - 仅依赖 `LLMResponse.stop_reason` 的标准化结果，不依赖 provider 原生字段
 3. **`_handle_approval()`** — 工具结果构建改用 `ToolResult`
 4. **import** — 从 `agent.llm` 导入统一类型
 
@@ -198,7 +240,12 @@ def create_llm(*, provider, api_key, model, max_tokens=1024, base_url="") -> Bas
 
 ### `cli.py` — 微调
 
-启动提示从 `"ANTHROPIC_API_KEY not found"` 改为 `"LLM_API_KEY not found"`，并显示当前 provider 和 model。
+CLI 提示文案不再绑定 Anthropic 专有环境变量。调整为更中性的提示语义：
+
+- 缺失凭据时提示 `No LLM credentials configured`
+- 文案层面说明会检查 `LLM_API_KEY` 和兼容 fallback 环境变量
+- 启动时显示当前 `provider`、`model` 和是否设置 `base_url`
+- 不打印 API key，不完整回显敏感 endpoint 参数
 
 ## 依赖变化
 
@@ -217,6 +264,33 @@ openai>=1.0.0       # 新增
 | tool schema 转换位置 | 各 client 内部 | `tools.py` 不需要感知 provider 差异 |
 | base_url 为空时行为 | 不传给 SDK | SDK 自动使用官方默认地址 |
 | 向后兼容策略 | `ANTHROPIC_*` 作为 fallback | 现有用户无需改任何配置 |
+| 停止原因统一层策略 | provider 内标准化 | 避免 `core.py` 感知底层 finish reason 细节 |
+| tool arguments 解析失败策略 | 显式抛错，不静默兜底 | 防止错误参数被继续执行 |
+
+## `base_url` 兼容策略
+
+为减少魔法行为，`base_url` 约定如下：
+
+1. 代码层不主动补全或规范化 `base_url`
+2. 用户需提供 provider 可接受的完整 endpoint
+3. 对于某些 OpenAI-compatible 服务，是否需要 `/v1` 由用户配置决定，代码只做原样透传
+4. `base_url` 为空时，不向 SDK 传该参数
+5. Anthropic 路径在实现阶段需验证当前依赖版本是否稳定支持 `base_url`；若 SDK 版本行为不一致，需要在实现时补充兼容处理，但不改变本计划的抽象层设计
+
+## 错误处理策略
+
+### 统一层约束
+
+- 若 provider 返回空文本且无工具调用，允许生成空 `LLMResponse.text`，但必须保留可识别的 `stop_reason`
+- 若 provider 返回未知停止原因，标准化为 `other`
+- 若 provider 返回非法工具调用参数，必须显式报错，不执行工具
+- 若 provider 返回的工具结果无法与 `ToolCall.id` 对应，视为协议不一致错误
+
+### provider 侧职责
+
+- provider 负责把原生响应尽可能收敛成统一结构
+- provider 负责在协议异常处尽早失败，而不是把脏数据传给 `core.py`
+- `core.py` 只消费合法的统一结构，不承担底层协议纠错职责
 
 ## 使用方式
 
@@ -241,6 +315,38 @@ openai>=1.0.0       # 新增
 2. 实现 `generate()` 及内部格式转换
 3. 在 `llm/__init__.py` 的 `create_llm()` 中注册
 
+## 测试计划
+
+本次变更属于“协议转换 + 配置泛化 + provider 抽象”重构，测试必须覆盖转换正确性和 Anthropic 回归行为。
+
+### 单元测试覆盖点
+
+| 测试类型 | 覆盖内容 |
+|---|---|
+| 配置测试 | `LLM_PROVIDER`、`LLM_API_KEY`、`LLM_MODEL`、`LLM_BASE_URL` 与 `ANTHROPIC_*` fallback 的解析行为 |
+| 工厂测试 | 不同 provider 名称映射到正确 client，未知 provider 抛 `ValueError` |
+| Anthropic 转换测试 | 统一消息 → Anthropic messages/tools；Anthropic response → `LLMResponse` |
+| OpenAI 转换测试 | 统一消息 → OpenAI messages/tools；OpenAI response → `LLMResponse` |
+| 错误处理测试 | 非法 tool arguments、未知 stop reason、无效 tool_call_id 触发受控失败 |
+| Core 回归测试 | `core.py` 在 Anthropic 路径下的工具调用循环行为保持兼容 |
+
+### 回归重点
+
+1. 老配置仅设置 `ANTHROPIC_API_KEY` 时，仍能正常初始化默认 LLM
+2. `core.py` 中不再出现 provider-specific block 结构判断
+3. 工具调用链在 Anthropic 与 OpenAI-compatible 下都能产出统一 `LLMResponse`
+4. 新增 provider 不需要修改 `tools.py`
+
+## 验收标准
+
+满足以下条件后，计划才允许进入实现阶段：
+
+1. `plan.md` 中的统一消息格式、停止原因和错误处理策略已经定稿
+2. `base_url` 的透传边界与不做自动规范化的约定已明确
+3. `config.py` 的向后兼容方案已明确，不会破坏现有 Anthropic 用户
+4. 测试清单已覆盖配置、转换、工厂和核心回归路径
+5. 团队确认 CLI 提示文案采用中性表述，不泄露敏感信息
+
 ## TODO
 
 - [ ] 1. 创建 `agent/llm/` 包结构（`__init__.py`, `types.py`, `base.py`）
@@ -254,3 +360,5 @@ openai>=1.0.0       # 新增
 - [ ] 9. 更新 `requirements.txt`
 - [ ] 10. 更新 `tests/test_agent.py` 适配 + 新增测试
 - [ ] 11. 运行测试确保全部通过
+- [ ] 12. 验证 Anthropic SDK 在当前依赖版本下的 `base_url` 行为
+- [ ] 13. 补充 provider 转换与错误处理测试用例
