@@ -4,7 +4,7 @@
 
 将单一 `llm.py` 拆分为 `llm/` 包，引入统一消息格式兼容层，让上层 `core.py` 与具体 LLM API 格式完全解耦。保留 Anthropic 支持并加 `base_url`，新增 OpenAI 兼容客户端支持 DeepSeek 等任意兼容 API。通过工厂模式根据配置选择 provider。
 
-本轮仅更新方案文档，不开始实现。重点补齐统一消息格式约束、停止原因标准化、错误处理策略、`base_url` 约定、CLI 提示语义和测试验收标准，确保计划进入可实施状态。
+本轮仅更新方案文档，不开始实现。重点补齐统一消息格式约束、停止原因标准化、错误处理策略、`base_url` 约定、CLI 提示语义、配置优先级、测试验收标准和 TODO 对齐关系，确保计划进入可实施状态。
 
 ## 目标文件结构
 
@@ -208,6 +208,18 @@ def create_llm(*, provider, api_key, model, max_tokens=1024, base_url="") -> Bas
     # 未知 provider -> raise ValueError
 ```
 
+#### provider 命名与别名规则
+
+为避免实现阶段临场判断，本计划固定以下映射规则：
+
+- `anthropic` → `AnthropicLLM`
+- `openai` → `OpenAICompatibleLLM`
+- `deepseek` → `OpenAICompatibleLLM`
+- `openai-compatible` → `OpenAICompatibleLLM`
+- 未知 provider 值一律 `raise ValueError`
+
+不在本轮计划中引入更宽松的大小写归一化、模糊匹配或自动猜测 provider 逻辑；调用方需提供合法 provider 名称。
+
 ### `config.py` — 通用化配置
 
 新增字段及环境变量映射：
@@ -222,6 +234,16 @@ def create_llm(*, provider, api_key, model, max_tokens=1024, base_url="") -> Bas
 保留 `anthropic_api_key` / `anthropic_model` 属性做向后兼容（委托到通用字段）。
 
 `llm_enabled` 判断逻辑不变：`bool(llm_api_key)`。
+
+#### 配置优先级规则
+
+为了满足实现期可预期性，配置读取优先级固定如下：
+
+1. `llm_provider` 只读取 `LLM_PROVIDER`，默认值为 `anthropic`
+2. `llm_api_key` 优先读取 `LLM_API_KEY`；当其为空时，再 fallback 到 `ANTHROPIC_API_KEY`
+3. `llm_model` 优先读取 `LLM_MODEL`；当其为空时，再 fallback 到 `ANTHROPIC_MODEL`
+4. `llm_base_url` 只读取 `LLM_BASE_URL`，为空表示未配置
+5. 不新增 provider-specific 的 `OPENAI_API_KEY`、`DEEPSEEK_API_KEY` 等分叉环境变量，避免配置面继续膨胀
 
 ### `core.py` — 适配统一格式
 
@@ -266,6 +288,8 @@ openai>=1.0.0       # 新增
 | 向后兼容策略 | `ANTHROPIC_*` 作为 fallback | 现有用户无需改任何配置 |
 | 停止原因统一层策略 | provider 内标准化 | 避免 `core.py` 感知底层 finish reason 细节 |
 | tool arguments 解析失败策略 | 显式抛错，不静默兜底 | 防止错误参数被继续执行 |
+| provider alias 范围 | 仅支持计划中显式列出的别名 | 避免自动猜测带来不确定性 |
+| 配置面控制 | 不引入更多 provider-specific env | 防止配置复杂度失控 |
 
 ## `base_url` 兼容策略
 
@@ -330,12 +354,25 @@ openai>=1.0.0       # 新增
 | 错误处理测试 | 非法 tool arguments、未知 stop reason、无效 tool_call_id 触发受控失败 |
 | Core 回归测试 | `core.py` 在 Anthropic 路径下的工具调用循环行为保持兼容 |
 
+### 最低测试交付要求
+
+进入实现后，至少需要补齐以下可执行测试项：
+
+1. 配置优先级测试：验证 `LLM_API_KEY` 覆盖 `ANTHROPIC_API_KEY`
+2. 配置回退测试：仅设置 `ANTHROPIC_API_KEY` 仍能启用默认 provider
+3. 工厂映射测试：验证 `anthropic`、`openai`、`deepseek`、`openai-compatible` 的映射结果
+4. 未知 provider 测试：传入非法 provider 时抛 `ValueError`
+5. OpenAI 参数解析失败测试：非法 JSON 参数触发受控异常
+6. 停止原因标准化测试：Anthropic/OpenAI 两条路径都能映射到统一值
+7. Core 回归测试：Anthropic 原有工具调用 loop 的行为结果不变
+
 ### 回归重点
 
 1. 老配置仅设置 `ANTHROPIC_API_KEY` 时，仍能正常初始化默认 LLM
 2. `core.py` 中不再出现 provider-specific block 结构判断
 3. 工具调用链在 Anthropic 与 OpenAI-compatible 下都能产出统一 `LLMResponse`
 4. 新增 provider 不需要修改 `tools.py`
+5. 默认 Anthropic 路径的对外行为保持兼容，不要求用户修改现有配置
 
 ## 验收标准
 
@@ -344,8 +381,11 @@ openai>=1.0.0       # 新增
 1. `plan.md` 中的统一消息格式、停止原因和错误处理策略已经定稿
 2. `base_url` 的透传边界与不做自动规范化的约定已明确
 3. `config.py` 的向后兼容方案已明确，不会破坏现有 Anthropic 用户
-4. 测试清单已覆盖配置、转换、工厂和核心回归路径
-5. 团队确认 CLI 提示文案采用中性表述，不泄露敏感信息
+4. provider 别名范围与配置优先级规则已明确，不依赖实现阶段临时决定
+5. 测试清单已覆盖配置、转换、工厂和核心回归路径
+6. 最低测试交付要求已经列成可执行项，而不是抽象原则
+7. 团队确认 CLI 提示文案采用中性表述，不泄露敏感信息
+8. 团队接受本轮不引入 LiteLLM，也不继续扩展更多 provider-specific 环境变量
 
 ## TODO
 
@@ -353,12 +393,15 @@ openai>=1.0.0       # 新增
 - [ ] 2. 迁移 `AnthropicLLM` 到 `llm/anthropic_client.py`，添加 base_url + 格式转换
 - [ ] 3. 新增 `llm/openai_client.py`（OpenAICompatibleLLM）
 - [ ] 4. 实现 `llm/__init__.py` 公共导出 + 工厂函数
-- [ ] 5. 更新 `agent/config.py` 通用化配置
-- [ ] 6. 更新 `agent/core.py` 适配统一消息格式
-- [ ] 7. 更新 `agent/cli.py` 提示信息
-- [ ] 8. 删除旧 `agent/llm.py`
-- [ ] 9. 更新 `requirements.txt`
-- [ ] 10. 更新 `tests/test_agent.py` 适配 + 新增测试
-- [ ] 11. 运行测试确保全部通过
-- [ ] 12. 验证 Anthropic SDK 在当前依赖版本下的 `base_url` 行为
-- [ ] 13. 补充 provider 转换与错误处理测试用例
+- [ ] 5. 固化 provider 别名规则与未知 provider 报错行为
+- [ ] 6. 更新 `agent/config.py` 通用化配置
+- [ ] 7. 固化 `LLM_*` 与 `ANTHROPIC_*` fallback 的优先级逻辑
+- [ ] 8. 更新 `agent/core.py` 适配统一消息格式
+- [ ] 9. 更新 `agent/cli.py` 提示信息
+- [ ] 10. 删除旧 `agent/llm.py`
+- [ ] 11. 更新 `requirements.txt`
+- [ ] 12. 更新 `tests/test_agent.py` 适配 + 新增测试
+- [ ] 13. 补充配置优先级、工厂映射、provider 转换与错误处理测试用例
+- [ ] 14. 运行测试确保全部通过
+- [ ] 15. 验证 Anthropic SDK 在当前依赖版本下的 `base_url` 行为
+- [ ] 16. 对照验收标准做一次实现前自检
