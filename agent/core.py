@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from agent.config import AgentConfig
-from agent.llm import AnthropicLLM, BaseLLMClient, extract_text
+from agent.llm import BaseLLMClient, ToolCall, ToolResult, create_llm, extract_text
 from agent.policy import CommandPolicy
 from agent.shell import ShellRunner
-from agent.tools import BaseTool, ToolExecutionResult, build_tools
+from agent.tools import ToolExecutionResult, build_tools
 
 
 @dataclass
@@ -33,8 +33,6 @@ class PendingApproval:
 
 
 class Agent:
-    """Minimal command-dispatch agent."""
-
     def __init__(
         self,
         shell_runner: Optional[ShellRunner] = None,
@@ -59,10 +57,12 @@ class Agent:
     def _build_default_llm(self) -> Optional[BaseLLMClient]:
         if not self.config.llm_enabled:
             return None
-        return AnthropicLLM(
-            api_key=self.config.anthropic_api_key,
-            model=self.config.anthropic_model,
+        return create_llm(
+            provider=self.config.llm_provider,
+            api_key=self.config.llm_api_key,
+            model=self.config.llm_model,
             max_tokens=self.config.llm_max_tokens,
+            base_url=self.config.llm_base_url,
         )
 
     def handle(self, command: str) -> AgentResponse:
@@ -72,11 +72,7 @@ class Agent:
             return self._handle_approval(normalized)
 
         if not normalized:
-            return AgentResponse(
-                ok=True,
-                command=command,
-                message="No command entered.",
-            )
+            return AgentResponse(ok=True, command=command, message="No command entered.")
 
         if normalized in {"exit", "quit"}:
             return AgentResponse(
@@ -92,9 +88,9 @@ class Agent:
                 command=normalized,
                 message=(
                     "Built-in commands: help, exit, quit\n"
-                    "If ANTHROPIC_API_KEY is configured, other input is sent to Claude with tool access.\n"
+                    "If LLM credentials are configured, other input is sent to the configured provider with tool access.\n"
                     "Read-file tool calls execute immediately. Write-file and git tool calls require yes/no approval.\n"
-                    "Without an API key, other input is executed as a shell command unless blocked by safety policy."
+                    "Without LLM credentials, other input is executed as a shell command unless blocked by safety policy."
                 ),
             )
 
@@ -125,8 +121,15 @@ class Agent:
 
     def _handle_approval(self, user_input: str) -> AgentResponse:
         pending = self.pending_approval
-        self.pending_approval = None
+        if pending is None:
+            return AgentResponse(
+                ok=False,
+                command=user_input,
+                stderr="No pending approval.",
+                returncode=1,
+            )
 
+        self.pending_approval = None
         approved = user_input.lower() in {"y", "yes"}
         tool = self.tools[pending.tool_name]
 
@@ -136,14 +139,13 @@ class Agent:
             result = ToolExecutionResult(ok=False, content="User denied tool execution.")
 
         tool_result_message = {
-            "role": "user",
-            "content": [
-                {
-                    "type": "tool_result",
-                    "tool_use_id": pending.tool_use_id,
-                    "content": result.content,
-                    "is_error": not result.ok,
-                }
+            "role": "tool_result",
+            "results": [
+                ToolResult(
+                    tool_call_id=pending.tool_use_id,
+                    content=result.content,
+                    is_error=not result.ok,
+                )
             ],
         }
         messages = pending.base_messages + [pending.assistant_message, tool_result_message]
@@ -165,23 +167,23 @@ class Agent:
                 messages=working_messages,
                 tools=[tool.definition() for tool in self.tools.values()],
             )
-            assistant_message = {"role": "assistant", "content": response.content}
-            tool_uses = [
-                block for block in response.content if block.get("type") == "tool_use"
-            ]
+            assistant_message = {
+                "role": "assistant",
+                "text": response.text,
+                "tool_calls": response.tool_calls,
+            }
 
-            if tool_uses:
-                tool_results = []
-                for block in tool_uses:
-                    tool_name = block["name"]
-                    tool = self.tools[tool_name]
-                    tool_input = dict(block.get("input") or {})
+            if response.tool_calls:
+                tool_results: List[ToolResult] = []
+                for tool_call in response.tool_calls:
+                    tool = self.tools[tool_call.name]
+                    tool_input = dict(tool_call.arguments)
                     if tool.requires_approval:
                         self.pending_approval = PendingApproval(
                             base_messages=working_messages,
                             assistant_message=assistant_message,
-                            tool_name=tool_name,
-                            tool_use_id=block["id"],
+                            tool_name=tool_call.name,
+                            tool_use_id=tool_call.id,
                             tool_input=tool_input,
                         )
                         return AgentResponse(
@@ -193,22 +195,21 @@ class Agent:
 
                     result = tool.execute(tool_input)
                     tool_results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": block["id"],
-                            "content": result.content,
-                            "is_error": not result.ok,
-                        }
+                        ToolResult(
+                            tool_call_id=tool_call.id,
+                            content=result.content,
+                            is_error=not result.ok,
+                        )
                     )
 
                 working_messages = working_messages + [
                     assistant_message,
-                    {"role": "user", "content": tool_results},
+                    {"role": "tool_result", "results": tool_results},
                 ]
                 continue
 
             self.history = working_messages + [assistant_message]
-            final_text = extract_text(response.content)
+            final_text = extract_text(response)
             return AgentResponse(
                 ok=True,
                 command=original_command,

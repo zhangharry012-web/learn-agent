@@ -389,19 +389,19 @@ openai>=1.0.0       # 新增
 
 ## TODO
 
-- [ ] 1. 创建 `agent/llm/` 包结构（`__init__.py`, `types.py`, `base.py`）
-- [ ] 2. 迁移 `AnthropicLLM` 到 `llm/anthropic_client.py`，添加 base_url + 格式转换
-- [ ] 3. 新增 `llm/openai_client.py`（OpenAICompatibleLLM）
-- [ ] 4. 实现 `llm/__init__.py` 公共导出 + 工厂函数
-- [ ] 5. 固化 provider 别名规则与未知 provider 报错行为
-- [ ] 6. 更新 `agent/config.py` 通用化配置
-- [ ] 7. 固化 `LLM_*` 与 `ANTHROPIC_*` fallback 的优先级逻辑
-- [ ] 8. 更新 `agent/core.py` 适配统一消息格式
-- [ ] 9. 更新 `agent/cli.py` 提示信息
-- [ ] 10. 删除旧 `agent/llm.py`
-- [ ] 11. 更新 `requirements.txt`
-- [ ] 12. 更新 `tests/test_agent.py` 适配 + 新增测试
-- [ ] 13. 补充配置优先级、工厂映射、provider 转换与错误处理测试用例
-- [ ] 14. 运行测试确保全部通过
-- [ ] 15. 验证 Anthropic SDK 在当前依赖版本下的 `base_url` 行为
-- [ ] 16. 对照验收标准做一次实现前自检
+- [x] 1. 创建 `agent/llm/` 包结构（`__init__.py`, `types.py`, `base.py`）
+- [x] 2. 迁移 `AnthropicLLM` 到 `llm/anthropic_client.py`，添加 base_url + 格式转换
+- [x] 3. 新增 `llm/openai_client.py`（OpenAICompatibleLLM）
+- [x] 4. 实现 `llm/__init__.py` 公共导出 + 工厂函数
+- [x] 5. 固化 provider 别名规则与未知 provider 报错行为
+- [x] 6. 更新 `agent/config.py` 通用化配置
+- [x] 7. 固化 `LLM_*` 与 `ANTHROPIC_*` fallback 的优先级逻辑
+- [x] 8. 更新 `agent/core.py` 适配统一消息格式
+- [x] 9. 更新 `agent/cli.py` 提示信息
+- [x] 10. 删除旧 `agent/llm.py`
+- [x] 11. 更新 `requirements.txt`
+- [x] 12. 更新 `tests/test_agent.py` 适配 + 新增测试
+- [x] 13. 补充配置优先级、工厂映射、provider 转换与错误处理测试用例
+- [x] 14. 运行测试确保全部通过
+- [x] 15. 验证 Anthropic SDK 在当前依赖版本下的 `base_url` 行为
+- [x] 16. 对照验收标准做一次实现前自检
