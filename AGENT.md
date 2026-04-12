@@ -139,6 +139,8 @@ Aim for most files to stay within roughly 200–300 lines when practical.
 
 This is a guideline, not a hard law. Do not split a file purely to satisfy a number if the split makes the design worse. Prefer responsibility-based decomposition over arbitrary file slicing.
 
+`AGENT.md` itself should stay under 10 KB. If it grows beyond that limit, simplify and compress the wording while preserving the actionable rules. Avoid repeating examples or rationale that can be stated once more concisely.
+
 ## Documentation synchronization
 
 If a change implements or materially advances an approved plan:
