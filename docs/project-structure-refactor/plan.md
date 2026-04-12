@@ -523,17 +523,17 @@ The refactor is successful if all of the following are true:
 
 ## TODO
 
-- [ ] Create `agent/tools/` package and shared modules (`base.py`, `types.py`, `registry.py`)
-- [ ] Move `ReadFileTool` and `WriteFileTool` into `agent/tools/file_tools.py`
-- [ ] Move `GitTool` into `agent/tools/git_tool.py`
-- [ ] Add `agent/tools/__init__.py` re-exports and preserve current import ergonomics
-- [ ] Introduce `agent/runtime/` package for runtime models/helpers
-- [ ] Move `AgentResponse` and `PendingApproval` into `agent/runtime/types.py`
-- [ ] Extract runtime message builders/system prompt into `agent/runtime/messages.py`
-- [ ] Re-evaluate whether `agent/runtime/agent.py` still needs a separate `loop.py`
-- [ ] Reduce `agent/core.py` to a thin facade or slimmer orchestration module
-- [ ] Update imports across production code to the new module layout
-- [ ] Split `tests/test_agent.py` into subsystem-oriented test modules
+- [x] Create `agent/tools/` package and shared modules (`base.py`, `types.py`, `registry.py`)
+- [x] Move `ReadFileTool` and `WriteFileTool` into `agent/tools/file_tools.py`
+- [x] Move `GitTool` into `agent/tools/git_tool.py`
+- [x] Add `agent/tools/__init__.py` re-exports and preserve current import ergonomics
+- [x] Introduce `agent/runtime/` package for runtime models/helpers
+- [x] Move `AgentResponse` and `PendingApproval` into `agent/runtime/types.py`
+- [x] Extract runtime message builders/system prompt into `agent/runtime/messages.py`
+- [x] Re-evaluate whether `agent/runtime/agent.py` still needs a separate `loop.py`
+- [x] Reduce `agent/core.py` to a thin facade or slimmer orchestration module
+- [x] Update imports across production code to the new module layout
+- [x] Split `tests/test_agent.py` into subsystem-oriented test modules
 - [ ] Run the full test suite and verify no behavior changes
 - [ ] Update README only where structure descriptions become outdated
 - [ ] Review final file sizes to ensure the refactor meets the 200–300 line target in practice
