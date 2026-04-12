@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Mapping
 
 from agent.tools.base import BaseTool
@@ -109,3 +110,75 @@ class WriteFileTool(BaseTool):
             f"path={payload.get('path')} mode={payload.get('mode')} "
             f"bytes={len(str(payload.get('content', '')).encode('utf-8'))}"
         )
+
+
+class EditFileTool(BaseTool):
+    name = 'edit_file'
+    description = (
+        'Edit an existing local text file in the current workspace by replacing exact text. '
+        'Use this tool for focused in-place updates instead of full rewrites when the change '
+        'is a clear search-and-replace. This tool always requires human approval before execution.'
+    )
+    requires_approval = True
+    input_schema = {
+        'type': 'object',
+        'properties': {
+            'path': {
+                'type': 'string',
+                'description': 'Relative path to the existing file to edit.',
+            },
+            'search': {
+                'type': 'string',
+                'description': 'Exact text to find.',
+            },
+            'replace': {
+                'type': 'string',
+                'description': 'Replacement text.',
+            },
+            'replace_all': {
+                'type': 'boolean',
+                'description': 'Whether to replace all matches. Defaults to false.',
+            },
+        },
+        'required': ['path', 'search', 'replace'],
+    }
+
+    def execute(self, payload: Mapping[str, Any]) -> ToolExecutionResult:
+        try:
+            path = self.resolve_path(str(payload['path']))
+            if not path.exists():
+                return ToolExecutionResult(ok=False, content='Target file does not exist.')
+
+            search = str(payload['search'])
+            replace = str(payload['replace'])
+            replace_all = bool(payload.get('replace_all', False))
+
+            if not search:
+                return ToolExecutionResult(ok=False, content='Search text must not be empty.')
+
+            original = path.read_text(encoding='utf-8')
+            matches = original.count(search)
+            if matches == 0:
+                return ToolExecutionResult(ok=False, content='Search text was not found in the file.')
+
+            if replace_all:
+                updated = original.replace(search, replace)
+                replacements = matches
+            else:
+                updated = original.replace(search, replace, 1)
+                replacements = 1
+
+            path.write_text(updated, encoding='utf-8')
+            result = {
+                'path': str(path.relative_to(self.workspace_root)),
+                'replacements': replacements,
+                'replace_all': replace_all,
+            }
+            return ToolExecutionResult(ok=True, content=json.dumps(result, ensure_ascii=False))
+        except Exception as exc:
+            return ToolExecutionResult(ok=False, content=str(exc))
+
+    def approval_prompt(self, payload: Mapping[str, Any]) -> str:
+        replace_all = bool(payload.get('replace_all', False))
+        scope = 'all matches' if replace_all else 'first match'
+        return f"Approve file edit? path={payload.get('path')} scope={scope}"

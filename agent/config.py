@@ -46,7 +46,7 @@ class AgentConfig:
     )
     llm_base_url: str = field(default_factory=lambda: _get_env_value('LLM_BASE_URL'))
     llm_max_tokens: int = 1024
-    enabled_tools: Tuple[str, ...] = ('read_file', 'write_file', 'git_run')
+    enabled_tools: Tuple[str, ...] = ('read_file', 'write_file', 'edit_file', 'git_run', 'exec')
 
     @property
     def anthropic_api_key(self) -> str:

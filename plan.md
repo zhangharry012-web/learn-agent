@@ -334,15 +334,15 @@ This keeps the current practical open-closed standard intact.
 
 ## TODO
 
-- [ ] Add `EditFileTool` to `agent/tools/file_tools.py`
-- [ ] Add `ExecTool` in `agent/tools/exec_tool.py`
-- [ ] Extend `ShellRunner.run(...)` to accept optional `cwd`
-- [ ] Export the new tools from `agent/tools/__init__.py`
-- [ ] Register `edit_file` and `exec` in `agent/tools/registry.py`
-- [ ] Update `agent/runtime/messages.py` system prompt for the new tools
-- [ ] Update `agent/cli.py` banner text for the new tool inventory
-- [ ] Add tool tests for `EditFileTool`, `ExecTool`, and registry defaults
-- [ ] Add runtime approval-flow tests covering `edit_file` and `exec`
-- [ ] Run targeted validation
-- [ ] Run full test validation
-- [ ] Commit and push the implementation round
+- [x] Add `EditFileTool` to `agent/tools/file_tools.py`
+- [x] Add `ExecTool` in `agent/tools/exec_tool.py`
+- [x] Extend `ShellRunner.run(...)` to accept optional `cwd`
+- [x] Export the new tools from `agent/tools/__init__.py`
+- [x] Register `edit_file` and `exec` in `agent/tools/registry.py`
+- [x] Update `agent/runtime/messages.py` system prompt for the new tools
+- [x] Update `agent/cli.py` banner text for the new tool inventory
+- [x] Add tool tests for `EditFileTool`, `ExecTool`, and registry defaults
+- [x] Add runtime approval-flow tests covering `edit_file` and `exec`
+- [x] Run targeted validation
+- [x] Run full test validation
+- [x] Commit and push the implementation round

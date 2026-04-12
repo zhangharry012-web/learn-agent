@@ -24,7 +24,7 @@ class ShellRunner:
     def __init__(self, timeout: int = 15) -> None:
         self.timeout = timeout
 
-    def run(self, command: str) -> ShellResult:
+    def run(self, command: str, cwd: Path = None) -> ShellResult:
         try:
             completed = subprocess.run(
                 command,
@@ -32,6 +32,7 @@ class ShellRunner:
                 text=True,
                 capture_output=True,
                 timeout=self.timeout,
+                cwd=str(cwd) if cwd is not None else None,
             )
             return ShellResult(
                 command=command,
@@ -43,8 +44,8 @@ class ShellRunner:
             return ShellResult(
                 command=command,
                 returncode=124,
-                stdout="",
-                stderr=f"Command timed out after {self.timeout} seconds.",
+                stdout='',
+                stderr=f'Command timed out after {self.timeout} seconds.',
             )
 
     def run_argv(self, argv: List[str], cwd: Path = None) -> ShellResult:
@@ -57,15 +58,15 @@ class ShellRunner:
                 cwd=str(cwd) if cwd is not None else None,
             )
             return ShellResult(
-                command=" ".join(argv),
+                command=' '.join(argv),
                 returncode=completed.returncode,
                 stdout=completed.stdout.strip(),
                 stderr=completed.stderr.strip(),
             )
         except subprocess.TimeoutExpired:
             return ShellResult(
-                command=" ".join(argv),
+                command=' '.join(argv),
                 returncode=124,
-                stdout="",
-                stderr=f"Command timed out after {self.timeout} seconds.",
+                stdout='',
+                stderr=f'Command timed out after {self.timeout} seconds.',
             )
