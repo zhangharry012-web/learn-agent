@@ -33,6 +33,7 @@ When `.env` contains valid LLM credentials, the agent routes user requests throu
 ```text
 learn-agent/
 ├── README.md
+├── AGENT.md
 ├── .env.example
 ├── LICENSE
 ├── main.py
@@ -41,12 +42,40 @@ learn-agent/
 │   ├── __init__.py
 │   ├── cli.py
 │   ├── config.py
-│   ├── core.py
+│   ├── core.py                  # thin compatibility facade
+│   ├── policy.py
 │   ├── shell.py
+│   ├── runtime/
+│   │   ├── __init__.py
+│   │   ├── agent.py
+│   │   ├── messages.py
+│   │   └── types.py
+│   ├── tools/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── file_tools.py
+│   │   ├── git_tool.py
+│   │   ├── registry.py
+│   │   └── types.py
 │   └── llm/
+│       ├── __init__.py
+│       ├── anthropic_client.py
+│       ├── base.py
+│       ├── openai_client.py
+│       └── types.py
+├── tests/
+│   ├── helpers.py
+│   ├── test_agent_runtime.py
+│   ├── test_config.py
+│   ├── test_llm_anthropic.py
+│   ├── test_llm_factory.py
+│   ├── test_llm_openai.py
+│   ├── test_policy.py
+│   └── test_tools.py
 └── docs/
     ├── architecture.md
-    └── multi-llm-provider/
+    ├── multi-llm-provider/
+    └── project-structure-refactor/
 ```
 
 ## Quick Start

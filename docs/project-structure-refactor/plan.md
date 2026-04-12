@@ -534,6 +534,6 @@ The refactor is successful if all of the following are true:
 - [x] Reduce `agent/core.py` to a thin facade or slimmer orchestration module
 - [x] Update imports across production code to the new module layout
 - [x] Split `tests/test_agent.py` into subsystem-oriented test modules
-- [ ] Run the full test suite and verify no behavior changes
-- [ ] Update README only where structure descriptions become outdated
-- [ ] Review final file sizes to ensure the refactor meets the 200–300 line target in practice
+- [x] Run the full test suite and verify no behavior changes
+- [x] Update README only where structure descriptions become outdated
+- [x] Review final file sizes to ensure the refactor meets the 200–300 line target in practice
