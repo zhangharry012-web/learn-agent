@@ -18,6 +18,8 @@ The rules below are derived from the recent project-structure refactor and the i
 
 This repository should follow a strict remote-visibility rule.
 
+This is mandatory: once a modification round is complete, the result must be visible on the remote branch so the user can review it there immediately.
+
 - After each completed round of file modification, create a commit and push it.
 - Do not leave meaningful completed work only in the local working tree.
 - If a round is incomplete because tests are broken or syntax is invalid, do not push that broken state unless the user explicitly asks for it.
@@ -83,6 +85,8 @@ Examples:
 ### Stage 2: full validation
 
 If the targeted validation passes, run the broader repository validation relevant to the change.
+
+Do not skip Stage 1 and jump straight to the full suite when the change is local, syntax-sensitive, or escaping-sensitive. The narrow check is the guardrail that catches fragile failures early.
 
 Typical order:
 
