@@ -11,6 +11,16 @@ The main changes will be:
 - split `tests/test_agent.py` into subsystem-oriented test modules
 - preserve the current external behavior and configuration model
 
+## What is being tightened in this revision
+
+Compared with the previous draft, this revision strengthens five areas:
+
+1. it clearly separates the high-priority refactor targets from modules that should remain mostly stable
+2. it makes `runtime/loop.py` conditional instead of mandatory, to avoid over-fragmentation
+3. it defines a practical open-closed acceptance standard for adding future tools
+4. it adds explicit refactor guardrails so the implementation stays structural rather than behavioral
+5. it adds migration and validation expectations around compatibility imports and file-size outcomes
+
 ## Target file structure
 
 ```text
@@ -26,8 +36,8 @@ learn-agent/
 │   │   ├── __init__.py
 │   │   ├── agent.py               # public Agent implementation
 │   │   ├── types.py               # AgentResponse, PendingApproval
-│   │   ├── loop.py                # llm tool loop orchestration helpers
-│   │   └── messages.py            # assistant/tool-result message builders + system prompt
+│   │   ├── messages.py            # assistant/tool-result message builders + system prompt
+│   │   └── loop.py                # optional: only if agent.py remains too dense after extraction
 │   ├── tools/
 │   │   ├── __init__.py
 │   │   ├── base.py                # BaseTool and shared path helpers
@@ -86,7 +96,7 @@ For tool-enabled LLM turns:
 agent.runtime.agent.Agent
    |
    v
-agent.runtime.loop helpers
+agent.runtime.messages
    |
    v
 agent.tools.registry.build_tools(...)
@@ -100,6 +110,8 @@ agent.tools.file_tools     agent.tools.git_tool
 ToolExecutionResult -> runtime message builders -> llm next turn
 ```
 
+If, after extracting runtime types and message helpers, the orchestration logic in `agent.runtime.agent` is still too dense, then an additional helper module `agent.runtime.loop` can be introduced. It should not be created by default unless it clearly improves readability.
+
 ## Module design
 
 ### `agent/core.py`
@@ -108,13 +120,17 @@ Role: preserve the current import entrypoint and avoid unnecessary churn.
 
 Planned shape:
 
-- either re-export `Agent`, `AgentResponse`, and `PendingApproval` from the new runtime package
-- or act as a very small facade module that imports from `agent.runtime`
+- re-export `Agent`, `AgentResponse`, and `PendingApproval` from the new runtime package
+- remain intentionally small
 
 Why:
 
 - keeps current import sites stable
 - avoids forcing unrelated changes in CLI/tests/docs beyond what is necessary
+
+Target outcome:
+
+- `agent/core.py` should become a thin compatibility surface rather than the main implementation home
 
 ### `agent/runtime/types.py`
 
@@ -159,38 +175,6 @@ def build_tool_result_message(tool_results: list[ToolResult]) -> dict[str, Any]:
 def build_system_prompt() -> str: ...
 ```
 
-### `agent/runtime/loop.py`
-
-Responsibilities:
-
-- host helpers for the iterative LLM/tool loop
-- keep step-limit and loop mechanics together
-- centralize logic that executes non-approval tool calls and collects `ToolResult`
-
-Why:
-
-- the looping behavior is the most complex part of the runtime
-- isolating it reduces `Agent` class size and gives future extensions a dedicated home
-
-Important note:
-
-- the public `Agent.handle(...)` flow should remain easy to read; `loop.py` should support that rather than obscuring it
-
-Possible helper shape:
-
-```python
-def run_llm_loop(agent: Agent, messages: list[dict[str, Any]], original_command: str) -> AgentResponse: ...
-```
-
-or a smaller helper set if passing the whole `Agent` object feels too implicit.
-
-Preferred direction:
-
-- keep it simple and explicit
-- if helper functions need too many parameters, place the logic as internal methods on `Agent` instead and use `messages.py` + `types.py` only
-
-This means `loop.py` is desirable but not mandatory if it makes the design worse. The implementation should optimize for clarity, not dogmatically maximize file count.
-
 ### `agent/runtime/agent.py`
 
 Responsibilities:
@@ -198,12 +182,34 @@ Responsibilities:
 - contain the public `Agent` class
 - own wiring of config, shell runner, policy, llm, tool registry, history, and pending approvals
 - route built-in commands
-- invoke helpers from `messages.py` and runtime/tool packages
+- invoke helpers from `messages.py` and tool packages
 
 Why:
 
 - keeps the top-level runtime object focused on orchestration
 - removes pure data/model and pure formatting concerns from the same file
+
+Target outcome:
+
+- keep the public `Agent` lifecycle readable in one place
+- only introduce further splitting if readability still suffers after the first extraction pass
+
+### Optional `agent/runtime/loop.py`
+
+Responsibilities if introduced:
+
+- host helpers for the iterative LLM/tool loop
+- keep step-limit and loop mechanics together
+- centralize logic that executes non-approval tool calls and collects `ToolResult`
+
+Decision rule:
+
+- create this file only if `agent/runtime/agent.py` would otherwise remain too large or too mentally dense after moving out data models and message helpers
+
+Why this is optional:
+
+- the project is still small
+- unnecessary decomposition would reduce clarity rather than improve it
 
 ### `agent/tools/types.py`
 
@@ -283,12 +289,22 @@ Important trade-off:
 - this is still an explicit registry, not dynamic plugin discovery
 - explicit construction is preferred here because the project is small and clarity matters more than framework flexibility
 
+Practical extensibility standard:
+
+After the refactor, adding a new tool should ideally require only:
+
+1. a new tool implementation module or a focused addition to the right tool-family module
+2. one registration update in `registry.py`
+3. one matching test addition in the appropriate test module
+
+It should not require editing unrelated existing tool implementations or central runtime behavior.
+
 ### `agent/tools/__init__.py`
 
 Responsibilities:
 
 - expose the public tool API
-- optionally provide compatibility re-exports so existing imports still work
+- provide compatibility re-exports so existing imports continue to work
 
 Likely exports:
 
@@ -305,6 +321,7 @@ Responsibilities:
 
 - mirror production subsystem boundaries
 - keep each test file focused and smaller
+- make failures easier to localize during future refactors
 
 Planned mapping:
 
@@ -317,6 +334,33 @@ Planned mapping:
 | OpenAI parsing tests | `tests/test_llm_openai.py` |
 | Anthropic normalization tests | `tests/test_llm_anthropic.py` |
 | Agent approval/runtime tests | `tests/test_agent_runtime.py` |
+
+## Must-change modules vs mostly-stable modules
+
+### Must-change modules
+
+- `agent/tools.py`
+- `agent/core.py`
+- `tests/test_agent.py`
+
+These are the direct structural hotspots.
+
+### Mostly-stable modules
+
+These should only receive minimal import-path or compatibility updates unless the implementation reveals a concrete need.
+
+- `agent/cli.py`
+- `agent/config.py`
+- `agent/policy.py`
+- `agent/shell.py`
+- `agent/llm/__init__.py`
+- `agent/llm/base.py`
+- `agent/llm/types.py`
+- `agent/llm/anthropic_client.py`
+- `agent/llm/openai_client.py`
+- `main.py`
+
+This boundary is intentional and should protect the refactor from expanding into a repository-wide rewrite.
 
 ## Design decisions
 
@@ -382,6 +426,38 @@ Why:
 - users requested a structural optimization, not a behavioral redesign
 - smaller blast radius makes validation easier
 
+### 5. Treat file-count growth as acceptable only when it improves cohesion
+
+Decision:
+
+- new files are justified only when each file has a crisp responsibility and reduces a real hotspot
+
+Why:
+
+- prevents “split everything” refactors
+- keeps the codebase ergonomic for a small team and a small repo
+
+## Refactor guardrails
+
+### Non-goals
+
+- redesigning the tool approval product behavior
+- redesigning shell policy semantics
+- redesigning provider configuration or `.env` loading
+- changing LLM request/response normalization logic
+- introducing dynamic plugin discovery
+- introducing a dependency injection framework
+- renaming user-facing commands
+- redesigning the CLI interaction model
+
+### Allowed structural-only changes
+
+- moving classes/functions into better-scoped modules
+- adding re-export layers for compatibility
+- renaming internal helper locations while preserving behavior
+- reorganizing tests so they mirror subsystem boundaries
+- making small import updates required by the new layout
+
 ## Dependencies
 
 No new runtime dependencies are planned.
@@ -417,41 +493,18 @@ Unless needed for import updates or minor cleanup, the following should remain b
 - `.env` semantics
 - provider alias semantics
 
-## Extensibility after the refactor
-
-### Adding a new tool
-
-Target path after refactor:
-
-1. create a new module in `agent/tools/` or extend the relevant tool-family module
-2. implement `BaseTool`
-3. add one explicit registration line in `agent/tools/registry.py`
-4. add focused tests in `tests/test_tools.py` or a dedicated tool test module if needed
-
-This is more additive and localized than editing one large shared `tools.py` file.
-
-### Adding runtime behavior
-
-If future work introduces richer approval strategies, command routing, or session state, there will be clearer landing zones:
-
-- runtime data -> `agent/runtime/types.py`
-- runtime message formatting -> `agent/runtime/messages.py`
-- runtime orchestration -> `agent/runtime/agent.py` or `loop.py`
-
-### Adding a new LLM provider
-
-This should continue using the existing `agent/llm/` pattern, which is already aligned with the desired design style.
-
 ## Migration strategy
 
 Implementation should proceed in small safe steps:
 
 1. create new packages/modules first
-2. move shared types/contracts
+2. move shared tool contracts/types
 3. move tool implementations and preserve exports
-4. move runtime models/helpers and preserve `agent.core` import surface
-5. split tests and keep coverage green throughout
-6. update README structure section only if it currently references old file layout in a way that becomes inaccurate
+4. extract runtime data models and message helpers
+5. re-check whether `agent/runtime/agent.py` still needs an additional `loop.py`
+6. reduce `agent/core.py` to a thin compatibility layer
+7. split tests and keep coverage green throughout
+8. update README structure section only if it currently references old file layout in a way that becomes inaccurate
 
 This order minimizes breakage and keeps each step verifiable.
 
@@ -461,11 +514,12 @@ The refactor is successful if all of the following are true:
 
 1. tests still pass
 2. public behavior is unchanged
-3. imports remain clean and unsurprising
+3. public imports remain clean and unsurprising
 4. `agent/tools.py` no longer contains the concrete tool implementations as a monolith
 5. `agent/core.py` is reduced to a thin facade or otherwise falls comfortably within the size target
 6. tests are split by subsystem rather than concentrated in a single file
 7. no new dependency or framework complexity is introduced
+8. adding a new tool would now be mostly additive under the practical standard defined above
 
 ## TODO
 
@@ -476,6 +530,7 @@ The refactor is successful if all of the following are true:
 - [ ] Introduce `agent/runtime/` package for runtime models/helpers
 - [ ] Move `AgentResponse` and `PendingApproval` into `agent/runtime/types.py`
 - [ ] Extract runtime message builders/system prompt into `agent/runtime/messages.py`
+- [ ] Re-evaluate whether `agent/runtime/agent.py` still needs a separate `loop.py`
 - [ ] Reduce `agent/core.py` to a thin facade or slimmer orchestration module
 - [ ] Update imports across production code to the new module layout
 - [ ] Split `tests/test_agent.py` into subsystem-oriented test modules

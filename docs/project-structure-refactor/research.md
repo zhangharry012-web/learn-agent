@@ -15,6 +15,19 @@ The current refactor request specifically calls out these goals:
 
 This document is based on a deep read of the current runtime, tooling, configuration, LLM integration, CLI entrypoint, and tests.
 
+## What needed strengthening in the first draft
+
+Before revising the documents, the first draft had several gaps that were worth tightening.
+
+1. It identified the main hotspots, but it did not clearly separate **must-change modules** from **should-stay-stable modules**.
+2. It proposed a `runtime/loop.py`, but the plan did not fully explain the decision rule for whether that split is actually worth keeping.
+3. It talked about open-closed improvements, but it did not define a practical acceptance standard for “adding a tool should be mostly additive”.
+4. It identified test splitting, but it did not connect test layout strongly enough to the target runtime/package boundaries.
+5. It proposed compatibility re-exports, but it did not explicitly discuss the migration risk if imports are changed too aggressively.
+6. It did not spell out enough guardrails to keep this change a structural refactor rather than a behavior refactor.
+
+The revised research and plan below close those gaps so the implementation phase can stay narrower and safer.
+
 ## Current top-level structure
 
 The project currently has a small flat `agent/` package with several single-file modules and one already-split subpackage for LLM providers.
@@ -98,6 +111,17 @@ The practical issue is not just line count. The larger problem is extension fric
 
 That means `core.py` is open for repeated modification whenever almost any runtime behavior changes. This is exactly the sort of hotspot that gradually violates open-closed expectations.
 
+#### Deeper assessment
+
+There is also a design tension inside `core.py`: some logic is stable infrastructure, while some logic is likely to evolve. The stable parts are the public `Agent` entrypoint and the high-level request lifecycle. The more volatile parts are:
+
+- prompt text
+- message assembly details
+- approval checkpoint handling details
+- multi-step tool loop mechanics
+
+This matters because a good refactor should isolate the volatile parts first. If everything remains in one file, low-risk tweaks still force editing the central runtime implementation.
+
 ### `agent/tools.py`
 
 `agent/tools.py` is the clearest candidate for package extraction. It currently contains:
@@ -140,6 +164,18 @@ This module should become a package with clearer layering:
 - registry/factory separated from implementations
 
 That would make adding a new tool mostly additive rather than requiring edits across unrelated tool code.
+
+#### Practical OCP standard for tools
+
+The refactor does not need to reach theoretical “zero modification” extensibility. A practical standard is enough. After the refactor, adding one new tool should ideally require:
+
+1. adding a new tool implementation file or extending the correct tool-family module
+2. adding one explicit registration entry in `registry.py`
+3. adding focused tests in the matching test module
+
+It should not require editing unrelated existing tool implementations, runtime message helpers, or the public `Agent` logic.
+
+That is the practical open-closed target for this codebase.
 
 ### `agent/llm/`
 
@@ -223,7 +259,7 @@ A better layout would likely mirror the package structure, for example:
 - `tests/test_config.py`
 - `tests/test_policy.py`
 - `tests/test_tools.py`
-- `tests/test_agent.py` or `tests/test_runtime.py`
+- `tests/test_agent_runtime.py`
 - `tests/test_llm_factory.py`
 - `tests/test_llm_openai.py`
 - `tests/test_llm_anthropic.py`
@@ -263,6 +299,29 @@ This coupling is healthier. `core.py` consumes unified abstractions from the LLM
 This is a stronger separation because `core.py` no longer needs to know provider-specific payload formats.
 
 The structural lesson is important: the LLM package shows the architecture style that the tools/runtime area should move toward.
+
+## Must-change vs should-stay-stable boundaries
+
+One of the most important planning guardrails is being explicit about where the refactor should happen and where it should not.
+
+### Must-change areas
+
+- `agent/tools.py` → should be replaced by a `agent/tools/` package
+- `agent/core.py` → should be reduced in responsibility and/or become a compatibility facade
+- `tests/test_agent.py` → should be split by subsystem
+
+### Should-stay-stable areas
+
+These can receive minimal import-path or compatibility adjustments, but should not be structurally redesigned in this refactor unless the implementation reveals a concrete need.
+
+- `agent/llm/`
+- `agent/config.py`
+- `agent/policy.py`
+- `agent/shell.py`
+- `agent/cli.py`
+- `main.py`
+
+This distinction matters because it prevents scope creep. The goal is to fix the main structural hotspots, not to relayout the entire repository.
 
 ## Open-closed principle assessment
 
@@ -321,11 +380,23 @@ Potential benefits:
 Possible dimensions:
 
 - `agent/runtime/types.py` for `AgentResponse` and `PendingApproval`
-- `agent/runtime/loop.py` for the LLM tool loop
-- `agent/runtime/messages.py` for assistant/tool-result message building
-- `agent/runtime/agent.py` for high-level public `Agent`
+- `agent/runtime/messages.py` for assistant/tool-result message building and system prompt helpers
+- `agent/runtime/agent.py` for the public `Agent`
+- optional `agent/runtime/loop.py` if the remaining loop logic still makes `agent/runtime/agent.py` too dense
 
 The key is not to over-fragment. The current project is still small, so the split should be simple and purposeful rather than “framework-like”.
+
+#### Important revision: `runtime/loop.py` is optional, not mandatory
+
+The first draft treated `runtime/loop.py` as part of the target tree. After deeper review, that should be framed as conditional.
+
+A better rule is:
+
+- first extract pure data models and pure message/prompt helpers
+- then re-check `agent/runtime/agent.py`
+- only introduce `runtime/loop.py` if the remaining orchestration logic is still too large or too difficult to read
+
+This is a better fit for the current codebase than forcing an extra module prematurely.
 
 ### Opportunity 3: split tests by subsystem
 
@@ -359,6 +430,31 @@ This is not mandatory for internal-only code, but it reduces churn and makes the
 
 5. The codebase is small enough that too much package fragmentation would be counterproductive.
    - The goal is better cohesion, not maximum abstraction.
+
+## Refactor guardrails
+
+To keep the implementation disciplined, the following should be treated as non-goals unless a small import adjustment is unavoidable.
+
+### Non-goals
+
+- redesigning the tool approval product behavior
+- redesigning shell policy semantics
+- redesigning provider configuration or `.env` loading
+- changing LLM request/response normalization logic
+- introducing dynamic plugin discovery
+- introducing a dependency injection framework
+- renaming user-facing commands
+- redesigning the CLI interaction model
+
+### Allowed structural-only changes
+
+- moving classes/functions into better-scoped modules
+- adding re-export layers for compatibility
+- renaming internal helper locations while preserving behavior
+- reorganizing tests so they mirror subsystem boundaries
+- making small import updates required by the new layout
+
+These guardrails are important because structural refactors often drift into behavior changes if they are not explicitly constrained.
 
 ## Recommended scope for the next refactor
 
