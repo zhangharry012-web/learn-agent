@@ -1,330 +1,410 @@
-# Tool Expansion Research
+# Observability Expansion Research
 
 ## Scope
 
-This research covers the current tool system in `learn-agent` and the concrete changes needed to add two new tools:
+This research covers how `learn-agent` currently executes LLM turns, tool calls, shell fallback commands, and approvals, and what structural changes are needed to add practical observability.
 
-- `edit_file`: edit an existing workspace file through search-and-replace operations
-- `exec`: execute a shell command directly
+The requested goal is to increase system observability so a human can inspect dedicated log files and understand at least:
 
-The goal is to extend the current architecture with minimal behavioral disruption while preserving the repository's existing approval model, runtime loop, provider-agnostic tool protocol, and packageized tool structure.
+- LLM call inputs and outputs
+- system processing results
+- execution duration
+- token usage
+- related runtime context that helps explain what happened
 
-## Current architecture relevant to this change
+The solution should fit the current small codebase, preserve the existing runtime architecture, and remain easy to inspect locally.
 
-### Runtime orchestration
+## Current runtime behavior in detail
 
-The active runtime entrypoint is `agent/runtime/agent.py`, re-exported through `agent/core.py`. The `Agent` object owns:
+### Entry flow
 
-- config loading
+The CLI entrypoint in `agent/cli.py` is intentionally thin. It:
+
+1. creates `Agent()`
+2. reads terminal input
+3. calls `agent.handle(command)`
+4. prints the returned `AgentResponse`
+
+So the real orchestration and the best observability insertion point is not the CLI. It is the runtime layer inside `agent/runtime/agent.py`.
+
+### `Agent` orchestration hotspots
+
+`agent/runtime/agent.py` currently owns all major state transitions:
+
+- config creation
 - shell runner creation
-- tool registry construction via `build_tools(...)`
-- message history
-- approval state via `PendingApproval`
-- the multi-turn LLM loop
+- tool registry construction
+- optional LLM construction
+- history storage
+- pending approval storage
+- built-in command handling
+- shell fallback execution when no LLM is configured
+- LLM loop execution
+- approval continuation logic
 
-The runtime exposes tools to the LLM by calling `tool.definition()` for each registered tool and passing the resulting schema to the provider client.
+This means observability can be added without large cross-cutting rewrites if the runtime gets a small logging collaborator.
 
-Tool execution flow is:
+Important current transitions:
 
-1. LLM emits one or more tool calls
-2. runtime appends an assistant message containing tool call metadata
-3. if any tool in that batch requires approval, runtime pauses and stores all requested tool calls in `PendingApproval`
-4. when user approves, runtime executes each stored tool call in order
-5. runtime turns each execution result into a `ToolResult`
-6. runtime appends a tool-result message and continues the loop
+#### `handle(...)`
 
-A key runtime safety rule already exists in the system prompt in `agent/runtime/messages.py`:
+This method routes between:
 
-- read before making claims about file contents
-- only request `write_file` when the user wants file creation/modification
-- only request `git_run` for repository operations
-- never request more than one approval-required tool call in the same response
+- approval continuation
+- built-ins (`help`, `exit`, `quit`)
+- LLM-backed mode
+- direct shell fallback mode
 
-That last line is stricter than the runtime implementation. The runtime can actually hold and execute multiple pending approval-required tool calls because `PendingApproval.tool_calls` is a list and `_handle_approval(...)` iterates over all of them. So the prompt is using policy to keep model behavior narrow, not reflecting a hard runtime limitation.
+Today none of those branches emit persistent execution logs.
 
-### Tool package structure
+#### `_handle_shell_turn(...)`
 
-The tool system is already split into a package:
+This path:
 
-- `agent/tools/base.py`
-- `agent/tools/types.py`
-- `agent/tools/file_tools.py`
-- `agent/tools/git_tool.py`
-- `agent/tools/registry.py`
-- `agent/tools/__init__.py`
+1. checks command policy
+2. possibly blocks the command
+3. otherwise executes `self.shell_runner.run(command)`
+4. returns `AgentResponse`
 
-This is the correct landing zone for the requested feature.
+This is one clear place to log system-level execution outcome and duration even when no LLM is configured.
 
-#### `BaseTool`
+#### `_handle_approval(...)`
 
-`BaseTool` provides:
+This path:
 
-- common metadata fields: `name`, `description`, `input_schema`, `requires_approval`
-- `definition()` to expose tool schema to providers
-- `approval_prompt(...)` default formatting
-- `resolve_path(...)` to constrain file operations to `workspace_root`
+1. restores the pending tool call state
+2. either executes the tool or emits a denial result
+3. constructs a tool-result message
+4. resumes the LLM loop
 
-This means the new `edit_file` tool should inherit `BaseTool` and reuse `resolve_path(...)` rather than introducing its own path safety logic.
+This is a critical observability point because it records whether the human approved or denied a tool action and what happened next.
 
-#### `ToolExecutionResult`
+#### `_run_llm_loop(...)`
 
-`ToolExecutionResult` is only:
+This is the main LLM orchestration loop. It:
 
-```python
-@dataclass
-class ToolExecutionResult:
-    ok: bool
-    content: str
+1. calls `self.llm.generate(...)`
+2. converts the result to an assistant message
+3. branches on tool calls vs terminal text
+4. executes non-approval tool calls immediately
+5. pauses if approval is needed
+6. appends tool results back into the conversation
+7. repeats until completion or step limit exceeded
+
+This is the single most important place for LLM observability because it contains both:
+
+- the LLM request/response boundary
+- the runtime processing that follows the LLM response
+
+## What is currently missing
+
+The project currently lacks an observability layer entirely.
+
+There is no:
+
+- dedicated log directory
+- structured event logger
+- persistent trace of user commands
+- persistent trace of LLM request/response metadata
+- timing capture for runtime stages
+- token usage capture
+- record of tool approvals/denials
+- record of shell fallback execution beyond transient CLI output
+
+The architecture document even lists execution logging as a future improvement, so this request matches an already-recognized gap.
+
+## LLM integration details relevant to observability
+
+### Common client abstraction
+
+`agent/llm/base.py` defines `BaseLLMClient.generate(...)` returning an `LLMResponse`.
+
+Today `LLMResponse` only includes:
+
+- `text`
+- `tool_calls`
+- `stop_reason`
+
+This is not enough to capture token usage or provider metadata. If the runtime should log token consumption generically, the response model likely needs to grow.
+
+### Provider response parsing
+
+#### Anthropic
+
+`agent/llm/anthropic_client.py` already has access to the raw SDK response object inside `_parse_response(...)`.
+
+Anthropic responses typically expose usage information such as input/output token counts. The current parser ignores that information entirely.
+
+#### OpenAI-compatible
+
+`agent/llm/openai_client.py` also has access to the raw completion response object inside `_parse_response(...)`.
+
+OpenAI-style responses typically expose `usage` data. The current parser also ignores that information entirely.
+
+Conclusion: token observability should not be inferred in the runtime. It should be extracted in each provider parser and normalized into shared response metadata.
+
+## Best structural landing zone for observability
+
+### A dedicated runtime observability module is the best fit
+
+Adding ad-hoc `print(...)` calls or open-coded JSON append logic directly in `agent/runtime/agent.py` would quickly make the runtime noisy and harder to evolve.
+
+The best fit is a small dedicated package or module under `agent/runtime/`, for example:
+
+- `agent/runtime/observability.py`
+- or split further into `logging.py` plus `events.py`
+
+Given current project scale, a single dedicated module is likely enough.
+
+That module can own:
+
+- log directory creation
+- event schema helpers
+- JSON-lines file writing
+- timestamp generation
+- sanitization/truncation policy for human-readable inspection
+
+Then `Agent` can emit events at key boundaries without embedding file I/O details everywhere.
+
+## What should be logged
+
+The request says "包括但不限于" LLM 调用和系统处理结果、执行时长、消耗 token 数等, so the design should log a useful minimum set.
+
+A practical event model for this project should include at least these event families:
+
+### 1. Session command events
+
+Triggered when `Agent.handle(...)` starts and ends processing a top-level user command.
+
+Useful fields:
+
+- timestamp
+- event type
+- original command
+- mode (`llm`, `shell_fallback`, `built_in`, `approval_response`)
+- overall success
+- overall duration_ms
+- response summary
+
+### 2. LLM call events
+
+Triggered around every `self.llm.generate(...)` call.
+
+Useful fields:
+
+- timestamp
+- provider
+- model
+- system prompt summary or full prompt
+- messages count
+- tool definitions count
+- duration_ms
+- stop_reason
+- output text summary
+- tool call summary
+- token usage
+
+### 3. Tool execution events
+
+Triggered whenever a tool executes or is denied.
+
+Useful fields:
+
+- tool name
+- tool input
+- whether approval was required
+- whether it was approved or denied
+- duration_ms if executed
+- success/failure
+- result summary
+
+### 4. Shell fallback events
+
+Triggered when no LLM is configured and the system runs a direct shell command.
+
+Useful fields:
+
+- command
+- cwd
+- duration_ms
+- returncode
+- stdout/stderr summary
+
+### 5. Runtime error or loop-limit events
+
+Triggered when:
+
+- provider parsing fails
+- tool name lookup fails
+- tool execution throws
+- maximum LLM step limit is exceeded
+
+These are exactly the moments that make postmortem inspection valuable.
+
+## Log format choice
+
+### JSONL is the best primary format
+
+For this codebase, JSON Lines in a dedicated log directory is the best fit because it is:
+
+- append-friendly
+- easy to inspect manually line by line
+- easy to grep
+- easy to parse later for summaries
+- trivial to produce with the standard library
+
+A practical directory layout could be:
+
+```text
+logs/
+└── observability/
+    ├── events.jsonl
+    └── sessions/
+        └── <session-id>.jsonl   # optional future refinement
 ```
 
-So each tool is responsible for serializing rich results into a string, typically JSON. Existing tools already return JSON strings for success and plain text for error in exceptional paths.
+For the current scope, one rolling `events.jsonl` inside a dedicated directory is enough.
 
-#### Existing file tools
+### Human readability vs payload size
 
-`agent/tools/file_tools.py` currently contains:
+The user explicitly wants logs to be easy for humans to inspect. That means the system should not dump massive full message histories unboundedly into every event.
 
-- `ReadFileTool`
-- `WriteFileTool`
+A good compromise is:
 
-`ReadFileTool`:
+- store structured fields
+- include compact previews of large text fields
+- include counts and summaries for collections
+- include full tool inputs for local tools because they are usually small
+- truncate very long model outputs/stdout/stderr beyond a safe threshold
 
-- reads UTF-8 text
-- optionally slices by `start_line` and `end_line`
-- returns JSON with path, selected range, and content
-- does not require approval
+This keeps the logs readable while still useful.
 
-`WriteFileTool`:
+## Dedicated log directory behavior
 
-- writes or appends text to a resolved path
-- creates parent directories if needed
-- requires approval
-- returns JSON with path, mode, and bytes written
-- customizes approval prompt to summarize path/mode/byte count
+The requirement asks for a dedicated log folder. The natural default is something like:
 
-This file is the natural place for `EditFileTool`, because it is another workspace file mutation primitive.
+- `logs/observability/`
 
-### Existing shell execution capability
+The logger should ensure the directory exists before writing.
 
-The project already has shell execution infrastructure in `agent/shell.py`:
+Potential useful files:
 
-- `ShellRunner.run(command: str)` executes with `shell=True`
-- `ShellRunner.run_argv(argv, cwd=...)` executes without shell interpolation
-- both return `ShellResult` with command, return code, stdout, stderr, and `ok`
+- `events.jsonl`: append-only structured event stream
+- `README.md` is not necessary for this feature
 
-There is also an existing approval-gated command tool in `agent/tools/git_tool.py`:
+No external logging dependency is required.
 
-- `GitTool` wraps `shell_runner.run_argv(['git'] + args, cwd=self.workspace_root)`
-- it requires approval
-- it returns a JSON object containing command, returncode, stdout, stderr
+## Configuration impact
 
-This is strong evidence that `exec` should be implemented as a sibling tool to `GitTool`, reusing `ShellRunner`, approval gating, and the same result envelope shape.
+`agent/config.py` currently has no observability settings.
 
-## LLM/provider integration impact
+At minimum, the feature needs defaults for:
 
-The provider clients do not hardcode tool names.
+- whether observability is enabled
+- log directory path
+- maybe preview truncation limit
 
-### `agent/llm/openai_client.py`
+A practical initial config extension would add fields such as:
 
-The OpenAI-compatible client converts the runtime-provided tool definitions into OpenAI function specs using each tool's `name`, `description`, and `input_schema`.
+- `observability_enabled: bool = True`
+- `observability_log_dir: str = 'logs/observability'`
+- `observability_preview_chars: int = 2000`
 
-Response parsing is generic:
+Those can default locally without needing `.env` changes immediately, but `.env`-based overrides would keep the design extensible.
 
-- tool name comes from provider output
-- arguments are parsed as JSON
-- runtime later resolves tool name against its registry
+## Shared metadata model needed for token usage
 
-### `agent/llm/anthropic_client.py`
+Because token data originates in provider responses, `agent/llm/types.py` is the right place to define shared usage data.
 
-The Anthropic client also forwards tool schemas generically and parses tool calls into provider-agnostic `ToolCall` instances.
+A good normalized structure is something like:
 
-Conclusion: adding new tools does not require provider code changes unless the tool schema shape triggers a parser edge case. For this request, no provider-layer modification should be necessary.
+- `TokenUsage`
+  - `input_tokens`
+  - `output_tokens`
+  - `total_tokens`
 
-## CLI and user-facing wording impact
+and possibly an `LLMResponseMeta` or direct field on `LLMResponse`.
 
-`agent/cli.py` currently prints:
+At current scale, embedding optional metadata directly into `LLMResponse` is simpler than introducing too many nested types, but a small dedicated `TokenUsage` dataclass would improve clarity.
 
-- when LLM is enabled: `with read_file, write_file, and git_run tools.`
+## Existing tests that will be affected
 
-That line becomes outdated once `edit_file` and `exec` exist. It should be updated so the runtime advertises the actual default tool set.
+### `tests/helpers.py`
 
-`agent/runtime/messages.py` also hardcodes tool guidance in the system prompt. If the default tool set changes, the prompt should be updated to teach the model when to use:
+`FakeLLM` currently only records calls and returns prepared `LLMResponse` objects. It can be extended to return LLM responses containing usage metadata without difficulty.
 
-- `edit_file` instead of broad overwrite writes for narrow edits
-- `exec` for direct shell commands
-- `git_run` only for repository-scoped git operations
+### `tests/test_agent_runtime.py`
 
-Without prompt updates, the model may keep overusing `write_file` or avoid `exec` even after the tools exist.
+This is the main place to validate that:
 
-## Tests and current coverage gaps
+- log files are created
+- LLM calls are logged
+- approval outcomes are logged
+- shell fallback execution is logged
 
-### Existing tool tests
+### `tests/test_llm_openai.py` and `tests/test_llm_anthropic.py`
 
-`tests/test_tools.py` currently covers:
+These are the correct places to assert usage parsing from provider responses.
 
-- `ReadFileTool`
-- `WriteFileTool`
-- `GitTool`
+### `tests/test_config.py`
 
-It does not cover:
+This should expand if config gains observability defaults or env overrides.
 
-- registration defaults in `build_tools(...)`
-- approval prompts for all tools
-- direct shell execution tools
-- search-and-replace semantics
-- failure cases around missing text, path escapes, or repeated replacements
+## Recommended implementation direction
 
-### Existing runtime tests
+### 1. Add normalized usage metadata to `LLMResponse`
 
-`tests/test_agent_runtime.py` validates:
+Provider parsers should populate token usage when the SDK response exposes it.
 
-- fallback shell behavior without LLM
-- approval flow for `write_file`
-- approval flow for `git_run`
+### 2. Add a dedicated runtime observability logger
 
-It does not explicitly test:
+This logger should:
 
-- approval flow for a second non-git mutating tool
-- approval flow for direct shell execution tool calls
-- mixed tool inventory visibility to the fake LLM
+- create the log directory lazily or at initialization
+- append JSONL events
+- expose small helper methods for common event types
+- apply truncation helpers for large text fields
 
-The existing test patterns are sufficient to extend without new test infrastructure.
+### 3. Inject the logger into `Agent`
 
-## Design constraints for the new tools
+`Agent` can create a default logger from config, similar to shell runner and policy creation.
 
-### `edit_file`
+### 4. Log at runtime boundaries, not deep everywhere
 
-The request says "编辑文件（搜索替换）", so the primary behavior should be explicit search-and-replace rather than patch syntax, line-edit scripting, or regex-first mutation.
+Good boundaries are:
 
-A safe minimal contract is:
+- start/end of `handle(...)`
+- before/after `llm.generate(...)`
+- approval requested / approved / denied
+- tool executed
+- shell fallback executed
+- loop limit exceeded
 
-- `path`: relative workspace path
-- `search`: exact text to find
-- `replace`: replacement text
-- optional `replace_all`: whether to replace all matches or only the first
+This keeps instrumentation meaningful rather than noisy.
 
-Expected behavior should be deterministic and conservative:
+### 5. Update README to mention the dedicated observability directory
 
-- resolve path within workspace using `resolve_path(...)`
-- require that the file already exists
-- read as UTF-8 text
-- if `search` is empty, fail clearly instead of allowing an undefined operation
-- if `search` is not found, return an error result rather than silently succeeding
-- write the updated content back atomically enough for current project scale using normal file rewrite
-- return JSON summarizing path and replacement count
-- require approval, because it mutates files
+The feature is user-visible operationally, so the README should mention:
 
-A search-and-replace exact match contract is simpler and less fragile than introducing regexes or patch hunks in the first step.
+- logs are written under the dedicated folder
+- what kinds of events are captured
 
-### `exec`
+## Risks and edge cases
 
-The request says "直接执行 shell 命令", so the tool should accept a single shell command string and execute it through `ShellRunner.run(...)`.
-
-Expected contract:
-
-- `command`: shell command string
-
-Expected behavior:
-
-- require approval
-- execute within `workspace_root`
-- return JSON with command, returncode, stdout, stderr
-
-The current `ShellRunner.run(...)` does not accept a `cwd` argument, only the argv variant does. That is a structural mismatch, because `exec` should run inside the repository workspace rather than the current process directory by accident.
-
-So there are two implementation options:
-
-1. extend `ShellRunner.run(...)` to accept optional `cwd`
-2. fake shell execution through `run_argv(['/bin/sh', '-lc', command], cwd=...)`
-
-Option 1 is cleaner because it preserves the interface meaning of `run(...)` while making it symmetric with `run_argv(...)`.
-
-## Best-fit implementation approach
-
-### Add `EditFileTool` to `agent/tools/file_tools.py`
-
-Why:
-
-- it belongs to the existing file mutation family
-- it can reuse `BaseTool.resolve_path(...)`
-- it keeps file mutation concerns grouped together
-
-### Add `ExecTool` in a new `agent/tools/exec_tool.py`
-
-Why:
-
-- it is a shell execution family, closer to `GitTool` than to file tools
-- it avoids turning `git_tool.py` into a mixed command execution module
-- it keeps room for future shell-adjacent tools such as `grep`, `ls`, or test-running wrappers
-
-### Update `agent/tools/registry.py`
-
-`build_tools(...)` should include the new default names:
-
-- `edit_file`
-- `exec`
-
-Current default set is `('read_file', 'write_file', 'git_run')`. It should become a fuller default tool inventory.
-
-### Update `agent/tools/__init__.py`
-
-Export the two new tool classes so imports remain simple and tests can import them directly.
-
-### Update `agent/runtime/messages.py`
-
-Adjust system prompt wording so the model knows:
-
-- use `read_file` before claims about file contents
-- use `edit_file` for focused in-place edits
-- use `write_file` for creating files or broad rewrites
-- use `exec` for direct shell commands
-- use `git_run` for git actions only
-- keep the single approval-required tool-call guidance unless we explicitly want the model to batch approvals later
-
-### Update `agent/cli.py`
-
-Refresh the enabled-tool text to match the new default inventory.
-
-## Open questions resolved by current codebase context
-
-### Should `edit_file` support regex?
-
-No for the first version.
-
-The repository currently values robustness and narrow semantics. Exact search-and-replace is easier to explain, test, and validate than regex replacement.
-
-### Should `exec` bypass approval because the CLI already runs shell commands without an LLM?
-
-No.
-
-The no-LLM fallback mode is an explicitly different path: direct user command entry. In tool mode, the LLM is choosing the action, so approval should remain mandatory just as it is for `write_file` and `git_run`.
-
-### Should `edit_file` live in its own file?
-
-Not necessary yet.
-
-`file_tools.py` is currently small enough that adding one more cohesive file-editing class remains within the repository's size guideline.
-
-### Should `exec` and `git_run` be unified?
-
-Not for now.
-
-`git_run` communicates a narrower, more controllable intent to the model. Keeping a dedicated git tool and a dedicated generic shell tool gives the prompt cleaner policy distinctions and preserves a lower-risk path for repository operations.
-
-## Risks to handle carefully
-
-1. **Prompt drift**: if the system prompt is not updated, the LLM may continue using `write_file` for narrow edits and underuse `edit_file`.
-2. **Working directory ambiguity**: if `exec` runs outside `workspace_root`, it may behave unpredictably or violate user expectations.
-3. **Silent no-op edits**: if `edit_file` succeeds when `search` is missing, debugging will be painful. It should fail loudly.
-4. **Approval-flow regressions**: new approval-required tools must integrate cleanly with `PendingApproval`.
-5. **Line-count drift**: `file_tools.py` should stay reasonably compact after adding `EditFileTool`; if it becomes too dense, a later split into `read_tool.py` / `write_edit_tools.py` could be considered, but that is not required now.
+1. **Overlogging sensitive content**: full prompts, file contents, stdout, and stderr may be large or sensitive. The logger should prefer bounded previews over unbounded dumps.
+2. **Runtime fragility from logging failures**: observability must never break core execution. Logging should fail closed and avoid raising into the main flow.
+3. **Provider metadata variability**: token usage fields differ between SDKs. Normalization logic must tolerate missing usage data.
+4. **Test brittleness around timestamps/durations**: tests should assert the presence of events and key fields, not exact timestamps.
+5. **File growth**: a single append-only file can grow large over time, but that is acceptable for this small local project's first observability iteration.
 
 ## Recommended scope for the next plan
 
 The next plan should cover:
 
-- adding `EditFileTool` and `ExecTool`
-- extending `ShellRunner.run(...)` with optional `cwd`
-- registering/exporting the new tools
-- updating system prompt and CLI wording
-- adding focused tool and runtime tests
-- leaving AGENT.md unchanged unless the implementation reveals a genuinely new long-term workflow rule
+- introducing a dedicated runtime observability module and JSONL event writer
+- extending config with observability defaults
+- extending `LLMResponse` to carry normalized token usage metadata
+- parsing usage metadata in Anthropic and OpenAI-compatible clients
+- instrumenting `Agent` around command handling, LLM calls, approval flow, tool execution, shell fallback, and loop-limit failures
+- adding tests for provider usage parsing and log file creation/content
+- updating README to document the dedicated log directory and what it contains
