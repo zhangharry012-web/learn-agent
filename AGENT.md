@@ -49,6 +49,13 @@ When changes involve any of the following, use the safest possible editing appro
 
 Directly rewrite the target file with the file-writing tool.
 
+When available, prefer tool capabilities with clear intent boundaries:
+
+- `edit_file`: edit an existing file through search-and-replace style updates
+- `exec`: directly execute a shell command for validation, inspection, or repository operations
+
+Use `edit_file` for narrow textual updates inside an existing file, and use full file rewrites when the change is broad or escaping-sensitive. Use `exec` for direct shell execution instead of building indirect script wrappers unless a saved script materially improves safety or reuse.
+
 ### Avoid
 
 - script-generates-script patterns
