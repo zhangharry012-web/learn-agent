@@ -6,7 +6,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from agent.config import AgentConfig
+from agent.config import (
+    DEFAULT_MODEL,
+    DEFAULT_PROVIDER,
+    PROVIDER_CLASS_ALIASES,
+    AgentConfig,
+)
 from agent.core import Agent
 from agent.llm import BaseLLMClient, LLMResponse, ToolCall, create_llm
 from agent.llm.anthropic_client import AnthropicLLM
@@ -86,17 +91,31 @@ class ToolTests(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
+    def test_defaults_are_loaded_from_environment(self):
+        with patch.dict(os.environ, {}, clear=True):
+            config = AgentConfig()
+            self.assertEqual(config.llm_provider, DEFAULT_PROVIDER)
+            self.assertEqual(config.llm_model, DEFAULT_MODEL)
+            self.assertEqual(config.llm_api_key, '')
+            self.assertEqual(config.llm_base_url, '')
+
     def test_llm_api_key_takes_precedence_over_anthropic_api_key(self):
         with patch.dict(os.environ, {'LLM_API_KEY': 'llm-key', 'ANTHROPIC_API_KEY': 'anth-key'}, clear=False):
-            config = AgentConfig(llm_provider='', llm_api_key='', llm_model='', llm_base_url='')
+            config = AgentConfig()
             self.assertEqual(config.llm_api_key, 'llm-key')
 
     def test_anthropic_api_key_fallback_works(self):
         with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'anth-key'}, clear=True):
-            config = AgentConfig(llm_provider='', llm_api_key='', llm_model='', llm_base_url='')
-            self.assertEqual(config.llm_provider, 'anthropic')
+            config = AgentConfig()
+            self.assertEqual(config.llm_provider, DEFAULT_PROVIDER)
             self.assertEqual(config.llm_api_key, 'anth-key')
             self.assertTrue(config.llm_enabled)
+
+    def test_provider_aliases_cover_supported_values(self):
+        self.assertEqual(PROVIDER_CLASS_ALIASES[DEFAULT_PROVIDER], 'anthropic')
+        self.assertEqual(PROVIDER_CLASS_ALIASES['openai'], 'openai-compatible')
+        self.assertEqual(PROVIDER_CLASS_ALIASES['deepseek'], 'openai-compatible')
+        self.assertEqual(PROVIDER_CLASS_ALIASES['openai-compatible'], 'openai-compatible')
 
 
 class FactoryTests(unittest.TestCase):

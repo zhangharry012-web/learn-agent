@@ -1,30 +1,28 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
-from typing import Tuple
+from dataclasses import dataclass, field
+from typing import Dict, FrozenSet, Mapping, Tuple
+
+DEFAULT_PROVIDER = 'anthropic'
+DEFAULT_MODEL = 'claude-sonnet-4-20250514'
+SUPPORTED_OPENAI_COMPATIBLE_PROVIDERS: FrozenSet[str] = frozenset(
+    {'openai', 'deepseek', 'openai-compatible'}
+)
 
 
 @dataclass
 class AgentConfig:
-    llm_provider: str = 'anthropic'
-    llm_api_key: str = ''
-    llm_model: str = 'claude-sonnet-4-20250514'
-    llm_base_url: str = ''
+    llm_provider: str = field(default_factory=lambda: os.getenv('LLM_PROVIDER', DEFAULT_PROVIDER))
+    llm_api_key: str = field(
+        default_factory=lambda: os.getenv('LLM_API_KEY') or os.getenv('ANTHROPIC_API_KEY', '')
+    )
+    llm_model: str = field(
+        default_factory=lambda: os.getenv('LLM_MODEL') or os.getenv('ANTHROPIC_MODEL', DEFAULT_MODEL)
+    )
+    llm_base_url: str = field(default_factory=lambda: os.getenv('LLM_BASE_URL', ''))
     llm_max_tokens: int = 1024
     enabled_tools: Tuple[str, ...] = ('read_file', 'write_file', 'git_run')
-
-    def __post_init__(self) -> None:
-        if not self.llm_provider:
-            self.llm_provider = os.getenv('LLM_PROVIDER', 'anthropic')
-        if not self.llm_api_key:
-            self.llm_api_key = os.getenv('LLM_API_KEY') or os.getenv('ANTHROPIC_API_KEY', '')
-        if not self.llm_model:
-            self.llm_model = os.getenv('LLM_MODEL') or os.getenv(
-                'ANTHROPIC_MODEL', 'claude-sonnet-4-20250514'
-            )
-        if not self.llm_base_url:
-            self.llm_base_url = os.getenv('LLM_BASE_URL', '')
 
     @property
     def anthropic_api_key(self) -> str:
@@ -37,3 +35,11 @@ class AgentConfig:
     @property
     def llm_enabled(self) -> bool:
         return bool(self.llm_api_key)
+
+
+PROVIDER_CLASS_ALIASES: Mapping[str, str] = {
+    DEFAULT_PROVIDER: 'anthropic',
+    'openai': 'openai-compatible',
+    'deepseek': 'openai-compatible',
+    'openai-compatible': 'openai-compatible',
+}
