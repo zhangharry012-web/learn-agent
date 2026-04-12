@@ -1,11 +1,11 @@
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from agent import config as config_module
 from agent.config import (
     DEFAULT_MODEL,
     DEFAULT_PROVIDER,
@@ -91,25 +91,49 @@ class ToolTests(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
-    def test_defaults_are_loaded_from_environment(self):
-        with patch.dict(os.environ, {}, clear=True):
+    def test_defaults_are_loaded_when_env_file_is_missing(self):
+        with patch.object(config_module, '_ENV_VALUES', {}):
             config = AgentConfig()
             self.assertEqual(config.llm_provider, DEFAULT_PROVIDER)
             self.assertEqual(config.llm_model, DEFAULT_MODEL)
             self.assertEqual(config.llm_api_key, '')
             self.assertEqual(config.llm_base_url, '')
 
-    def test_llm_api_key_takes_precedence_over_anthropic_api_key(self):
-        with patch.dict(os.environ, {'LLM_API_KEY': 'llm-key', 'ANTHROPIC_API_KEY': 'anth-key'}, clear=False):
+    def test_env_file_values_are_used(self):
+        fake_values = {
+            'LLM_PROVIDER': 'deepseek',
+            'LLM_API_KEY': 'env-key',
+            'LLM_MODEL': 'deepseek-chat',
+            'LLM_BASE_URL': 'https://api.deepseek.com',
+        }
+        with patch.object(config_module, '_ENV_VALUES', fake_values):
             config = AgentConfig()
-            self.assertEqual(config.llm_api_key, 'llm-key')
+            self.assertEqual(config.llm_provider, 'deepseek')
+            self.assertEqual(config.llm_api_key, 'env-key')
+            self.assertEqual(config.llm_model, 'deepseek-chat')
+            self.assertEqual(config.llm_base_url, 'https://api.deepseek.com')
 
     def test_anthropic_api_key_fallback_works(self):
-        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'anth-key'}, clear=True):
+        fake_values = {'ANTHROPIC_API_KEY': 'anth-key'}
+        with patch.object(config_module, '_ENV_VALUES', fake_values):
             config = AgentConfig()
             self.assertEqual(config.llm_provider, DEFAULT_PROVIDER)
             self.assertEqual(config.llm_api_key, 'anth-key')
             self.assertTrue(config.llm_enabled)
+
+    def test_load_env_file_parses_plain_lines(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            env_file = root / '.env'
+            env_file.write_text(
+                '# comment\nLLM_PROVIDER=openai\nLLM_API_KEY=test-key\nLLM_BASE_URL="https://example.com"\n',
+                encoding='utf-8',
+            )
+            with patch('agent.config.Path.cwd', return_value=root):
+                values = config_module._load_env_file()
+            self.assertEqual(values['LLM_PROVIDER'], 'openai')
+            self.assertEqual(values['LLM_API_KEY'], 'test-key')
+            self.assertEqual(values['LLM_BASE_URL'], 'https://example.com')
 
     def test_provider_aliases_cover_supported_values(self):
         self.assertEqual(PROVIDER_CLASS_ALIASES[DEFAULT_PROVIDER], 'anthropic')
