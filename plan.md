@@ -378,16 +378,16 @@ This design should make future observability additions mostly additive, such as:
 
 ## TODO
 
-- [ ] Add normalized token usage metadata to `agent/llm/types.py`
-- [ ] Parse token usage in `agent/llm/anthropic_client.py`
-- [ ] Parse token usage in `agent/llm/openai_client.py`
-- [ ] Add observability config defaults to `agent/config.py`
-- [ ] Add `agent/runtime/observability.py` with safe JSONL event logging
-- [ ] Instrument `agent/runtime/agent.py` for command lifecycle, LLM calls, tool events, shell fallback events, and loop-limit failures
-- [ ] Update `README.md` to document observability logs and directory layout
-- [ ] Add/extend tests for provider usage parsing
-- [ ] Add runtime tests for observability log creation and key event capture
-- [ ] Add/extend config tests for observability defaults
-- [ ] Run targeted validation
-- [ ] Run full test validation
-- [ ] Commit and push the implementation round
+- [x] Add normalized token usage metadata to `agent/llm/types.py`
+- [x] Parse token usage in `agent/llm/anthropic_client.py`
+- [x] Parse token usage in `agent/llm/openai_client.py`
+- [x] Add observability config defaults to `agent/config.py`
+- [x] Add `agent/runtime/observability.py` with safe JSONL event logging
+- [x] Instrument `agent/runtime/agent.py` for command lifecycle, LLM calls, tool events, shell fallback events, and loop-limit failures
+- [x] Update `README.md` to document observability logs and directory layout
+- [x] Add/extend tests for provider usage parsing
+- [x] Add runtime tests for observability log creation and key event capture
+- [x] Add/extend config tests for observability defaults
+- [x] Run targeted validation
+- [x] Run full test validation
+- [x] Commit and push the implementation round

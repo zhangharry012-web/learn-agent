@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -11,6 +13,7 @@ from agent.runtime.messages import (
     build_system_prompt,
     build_tool_result_message,
 )
+from agent.runtime.observability import ObservabilityLogger
 from agent.runtime.types import AgentResponse, PendingApproval
 from agent.shell import ShellRunner
 from agent.tools import ToolExecutionResult, build_tools
@@ -26,6 +29,7 @@ class Agent:
         llm: Optional[BaseLLMClient] = None,
         config: Optional[AgentConfig] = None,
         workspace_root: Optional[Path] = None,
+        observability_logger: Optional[ObservabilityLogger] = None,
     ) -> None:
         self.config = config or AgentConfig()
         self.shell_runner = shell_runner or ShellRunner()
@@ -39,6 +43,12 @@ class Agent:
         )
         self.history: List[Dict[str, Any]] = []
         self.pending_approval: Optional[PendingApproval] = None
+        self.session_id = uuid.uuid4().hex
+        self.observability = observability_logger or ObservabilityLogger(
+            log_dir=self.workspace_root / self.config.observability_log_dir,
+            enabled=self.config.observability_enabled,
+            preview_chars=self.config.observability_preview_chars,
+        )
 
     def _build_default_llm(self) -> Optional[BaseLLMClient]:
         if not self.config.llm_enabled:
@@ -52,36 +62,76 @@ class Agent:
         )
 
     def handle(self, command: str) -> AgentResponse:
+        started_at = time.perf_counter()
         normalized = command.strip()
+        mode = 'input'
+        self.observability.log_event(
+            'command_received',
+            self.session_id,
+            {'command': command, 'normalized_command': normalized},
+        )
         if self.pending_approval is not None:
-            return self._handle_approval(normalized)
-        if not normalized:
-            return AgentResponse(ok=True, command=command, message='No command entered.')
-        if normalized in {'exit', 'quit'}:
-            return AgentResponse(
+            mode = 'approval_response'
+            response = self._handle_approval(normalized)
+        elif not normalized:
+            mode = 'built_in'
+            response = AgentResponse(ok=True, command=command, message='No command entered.')
+        elif normalized in {'exit', 'quit'}:
+            mode = 'built_in'
+            response = AgentResponse(
                 ok=True,
                 command=normalized,
                 message='Session closed.',
                 should_exit=True,
             )
-        if normalized == 'help':
-            return AgentResponse(
+        elif normalized == 'help':
+            mode = 'built_in'
+            response = AgentResponse(
                 ok=True,
                 command=normalized,
                 message=(
                     'Built-in commands: help, exit, quit\n'
                     'If LLM credentials are configured, other input is sent to the configured provider with tool access.\n'
-                    'Read-file tool calls execute immediately. Write-file and git tool calls require yes/no approval.\n'
+                    'Read-file tool calls execute immediately. Write-file, edit-file, exec, and git tool calls require yes/no approval.\n'
                     'Without LLM credentials, other input is executed as a shell command unless blocked by safety policy.'
                 ),
             )
-        if self.llm is not None:
-            return self._handle_llm_turn(normalized)
-        return self._handle_shell_turn(normalized)
+        elif self.llm is not None:
+            mode = 'llm'
+            response = self._handle_llm_turn(normalized)
+        else:
+            mode = 'shell_fallback'
+            response = self._handle_shell_turn(normalized)
+        self.observability.log_event(
+            'command_completed',
+            self.session_id,
+            {
+                'command': command,
+                'mode': mode,
+                'ok': response.ok,
+                'awaiting_confirmation': response.awaiting_confirmation,
+                'returncode': response.returncode,
+                'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
+                'message': response.message,
+                'stdout': response.stdout,
+                'stderr': response.stderr,
+            },
+        )
+        return response
 
     def _handle_shell_turn(self, command: str) -> AgentResponse:
+        started_at = time.perf_counter()
         decision = self.policy.evaluate(command)
         if not decision.allowed:
+            self.observability.log_event(
+                'command_blocked',
+                self.session_id,
+                {
+                    'command': command,
+                    'reason': decision.reason,
+                    'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
+                },
+            )
             return AgentResponse(
                 ok=False,
                 command=command,
@@ -89,6 +139,17 @@ class Agent:
                 returncode=126,
             )
         result = self.shell_runner.run(command)
+        self.observability.log_event(
+            'shell_fallback_executed',
+            self.session_id,
+            {
+                'command': result.command,
+                'returncode': result.returncode,
+                'stdout': result.stdout,
+                'stderr': result.stderr,
+                'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
+            },
+        )
         return AgentResponse(
             ok=result.ok,
             command=result.command,
@@ -106,11 +167,34 @@ class Agent:
         if pending is None:
             return AgentResponse(ok=False, command=user_input, stderr='No pending approval.', returncode=1)
         self.pending_approval = None
+        approved = user_input.lower() in {'y', 'yes'}
+        self.observability.log_event(
+            'tool_approval_decided',
+            self.session_id,
+            {
+                'tool_name': pending.tool_name,
+                'approved': approved,
+                'tool_input': pending.tool_input,
+            },
+        )
         tool = self.tools[pending.tool_name]
+        started_at = time.perf_counter()
         result = (
             tool.execute(pending.tool_input)
-            if user_input.lower() in {'y', 'yes'}
+            if approved
             else ToolExecutionResult(ok=False, content='User denied tool execution.')
+        )
+        self.observability.log_event(
+            'tool_executed',
+            self.session_id,
+            {
+                'tool_name': pending.tool_name,
+                'approved': approved,
+                'ok': result.ok,
+                'tool_input': pending.tool_input,
+                'result': result.content,
+                'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
+            },
         )
         tool_result_message = build_tool_result_message(
             [
@@ -133,11 +217,41 @@ class Agent:
                 returncode=1,
             )
         working_messages = list(messages)
-        for _ in range(MAX_LLM_TOOL_STEPS):
+        for step in range(MAX_LLM_TOOL_STEPS):
+            started_at = time.perf_counter()
             response = self.llm.generate(
                 system_prompt=build_system_prompt(),
                 messages=working_messages,
                 tools=[tool.definition() for tool in self.tools.values()],
+            )
+            self.observability.log_event(
+                'llm_call_completed',
+                self.session_id,
+                {
+                    'step': step + 1,
+                    'provider': self.config.llm_provider,
+                    'model': self.config.llm_model,
+                    'message_count': len(working_messages),
+                    'tool_count': len(self.tools),
+                    'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
+                    'stop_reason': response.stop_reason,
+                    'text': response.text,
+                    'tool_calls': [
+                        {
+                            'id': tool_call.id,
+                            'name': tool_call.name,
+                            'arguments': tool_call.arguments,
+                        }
+                        for tool_call in response.tool_calls
+                    ],
+                    'usage': None
+                    if response.usage is None
+                    else {
+                        'input_tokens': response.usage.input_tokens,
+                        'output_tokens': response.usage.output_tokens,
+                        'total_tokens': response.usage.total_tokens,
+                    },
+                },
             )
             assistant_message = build_assistant_message(response.text, response.tool_calls)
             if response.tool_calls:
@@ -153,13 +267,35 @@ class Agent:
                             tool_use_id=tool_call.id,
                             tool_input=tool_input,
                         )
+                        self.observability.log_event(
+                            'tool_approval_requested',
+                            self.session_id,
+                            {
+                                'tool_name': tool_call.name,
+                                'tool_input': tool_input,
+                                'tool_use_id': tool_call.id,
+                            },
+                        )
                         return AgentResponse(
                             ok=True,
                             command=original_command,
                             message=tool.approval_prompt(tool_input) + ' [yes/no]',
                             awaiting_confirmation=True,
                         )
+                    tool_started_at = time.perf_counter()
                     result = tool.execute(tool_input)
+                    self.observability.log_event(
+                        'tool_executed',
+                        self.session_id,
+                        {
+                            'tool_name': tool_call.name,
+                            'approved': True,
+                            'ok': result.ok,
+                            'tool_input': tool_input,
+                            'result': result.content,
+                            'duration_ms': round((time.perf_counter() - tool_started_at) * 1000, 3),
+                        },
+                    )
                     tool_results.append(
                         ToolResult(
                             tool_call_id=tool_call.id,
@@ -179,6 +315,14 @@ class Agent:
                 command=original_command,
                 message=final_text or 'No text response returned.',
             )
+        self.observability.log_event(
+            'llm_loop_limit_exceeded',
+            self.session_id,
+            {
+                'command': original_command,
+                'max_steps': MAX_LLM_TOOL_STEPS,
+            },
+        )
         return AgentResponse(
             ok=False,
             command=original_command,

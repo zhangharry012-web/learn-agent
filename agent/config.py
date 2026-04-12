@@ -35,6 +35,23 @@ def _get_env_value(key: str, default: str = '') -> str:
     return env_file_values.get(key, default)
 
 
+def _get_env_bool(key: str, default: bool) -> bool:
+    raw = _get_env_value(key)
+    if not raw:
+        return default
+    return raw.lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _get_env_int(key: str, default: int) -> int:
+    raw = _get_env_value(key)
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 @dataclass
 class AgentConfig:
     llm_provider: str = field(default_factory=lambda: _get_env_value('LLM_PROVIDER', DEFAULT_PROVIDER))
@@ -47,6 +64,13 @@ class AgentConfig:
     llm_base_url: str = field(default_factory=lambda: _get_env_value('LLM_BASE_URL'))
     llm_max_tokens: int = 1024
     enabled_tools: Tuple[str, ...] = ('read_file', 'write_file', 'edit_file', 'git_run', 'exec')
+    observability_enabled: bool = field(default_factory=lambda: _get_env_bool('OBSERVABILITY_ENABLED', True))
+    observability_log_dir: str = field(
+        default_factory=lambda: _get_env_value('OBSERVABILITY_LOG_DIR', 'logs/observability')
+    )
+    observability_preview_chars: int = field(
+        default_factory=lambda: _get_env_int('OBSERVABILITY_PREVIEW_CHARS', 2000)
+    )
 
     @property
     def anthropic_api_key(self) -> str:

@@ -33,3 +33,15 @@ class OpenAIParsingTests(unittest.TestCase):
         llm = OpenAICompatibleLLM.__new__(OpenAICompatibleLLM)
         parsed = llm._parse_response(response)
         self.assertEqual(parsed.stop_reason, 'max_tokens')
+
+    def test_openai_usage_is_normalized(self):
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(finish_reason='stop', message=SimpleNamespace(content='done', tool_calls=[]))],
+            usage=SimpleNamespace(prompt_tokens=12, completion_tokens=8, total_tokens=20),
+        )
+        llm = OpenAICompatibleLLM.__new__(OpenAICompatibleLLM)
+        parsed = llm._parse_response(response)
+        self.assertIsNotNone(parsed.usage)
+        self.assertEqual(parsed.usage.input_tokens, 12)
+        self.assertEqual(parsed.usage.output_tokens, 8)
+        self.assertEqual(parsed.usage.total_tokens, 20)

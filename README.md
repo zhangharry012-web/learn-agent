@@ -4,21 +4,24 @@ A Python-based AI agent project that uses the shell as its command interaction l
 
 `learn-agent` is intended as a lightweight starting point for building local agents that accept commands, execute shell tasks, manage basic session context, and return structured results. The repository is designed to be readable by both human developers and AI agents.
 
-When `.env` contains valid LLM credentials, the agent routes user requests through the configured provider and exposes three local tools:
+When `.env` contains valid LLM credentials, the agent routes user requests through the configured provider and exposes local tools:
 
 - `read_file`: read local files directly without approval
 - `write_file`: write local files after explicit human approval
+- `edit_file`: edit local files through search-and-replace after explicit human approval
 - `git_run`: execute git commands after explicit human approval
+- `exec`: execute direct shell commands after explicit human approval
 
 ## Features
 
 - Python implementation with a simple CLI entrypoint
 - Anthropic and OpenAI-compatible provider support
 - `.env`-based local configuration
-- Tool-based local file and git access
+- Tool-based local file and shell access
 - Session-oriented interaction loop
 - Clear separation between CLI, agent logic, and shell runner
 - Basic safety policy for dangerous shell commands
+- Structured observability logs under a dedicated log directory
 - Minimal structure that is easy to extend
 
 ## Use Cases
@@ -26,6 +29,7 @@ When `.env` contains valid LLM credentials, the agent routes user requests throu
 - Build a local command-line AI assistant
 - Prototype shell-capable automation agents
 - Learn agent execution flow and tool orchestration
+- Inspect LLM and runtime behavior through local observability logs
 - Provide an AI-agent-friendly project skeleton for further development
 
 ## Project Structure
@@ -37,6 +41,8 @@ learn-agent/
 ├── .env.example
 ├── LICENSE
 ├── main.py
+├── plan.md
+├── research.md
 ├── requirements.txt
 ├── agent/
 │   ├── __init__.py
@@ -49,10 +55,12 @@ learn-agent/
 │   │   ├── __init__.py
 │   │   ├── agent.py
 │   │   ├── messages.py
+│   │   ├── observability.py
 │   │   └── types.py
 │   ├── tools/
 │   │   ├── __init__.py
 │   │   ├── base.py
+│   │   ├── exec_tool.py
 │   │   ├── file_tools.py
 │   │   ├── git_tool.py
 │   │   ├── registry.py
@@ -108,6 +116,9 @@ Example Anthropic config:
 LLM_PROVIDER=anthropic
 LLM_API_KEY=your_api_key
 LLM_MODEL=claude-sonnet-4-20250514
+OBSERVABILITY_ENABLED=true
+OBSERVABILITY_LOG_DIR=logs/observability
+OBSERVABILITY_PREVIEW_CHARS=2000
 ```
 
 Example DeepSeek config:
@@ -138,6 +149,30 @@ Or:
 python -m agent.cli
 ```
 
+## Observability Logs
+
+The agent writes structured observability logs to a dedicated directory by default:
+
+```text
+logs/observability/events.jsonl
+```
+
+The JSONL stream includes events for:
+
+- top-level command receipt and completion
+- LLM call results, duration, stop reason, and token usage when the provider exposes it
+- tool approval requests and approval decisions
+- tool execution results and durations
+- shell fallback execution results
+- loop-limit failures
+
+Useful inspection commands:
+
+```bash
+tail -n 20 logs/observability/events.jsonl
+grep '"event_type": "llm_call_completed"' logs/observability/events.jsonl
+```
+
 ## Example Commands
 
 Inside the interactive shell:
@@ -162,6 +197,7 @@ This project is intentionally structured for machine readability and automation:
 - Plain-text interaction contract
 - Clear extension points for future tools, memory, or model integration
 - Baseline safeguards for obviously destructive commands
+- Structured runtime logging for debugging and inspection
 
 ## Documentation
 
@@ -173,9 +209,10 @@ This project is intentionally structured for machine readability and automation:
 
 - Add command routing and intent parsing
 - Add memory and conversation persistence
-- Add pluggable tool registry
+- Expand pluggable tool registry
 - Add confirmation hooks on top of the current safety denylist
 - Expand automated test coverage
+- Add log rotation or per-session trace splitting if observability volume grows
 
 ## License
 

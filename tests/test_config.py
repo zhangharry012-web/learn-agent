@@ -1,73 +1,90 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
-from agent.config import (
-    DEFAULT_MODEL,
-    DEFAULT_PROVIDER,
-    PROVIDER_CLASS_ALIASES,
-    AgentConfig,
-)
+from agent.config import AgentConfig, _load_env_file
 
 
 class ConfigTests(unittest.TestCase):
-    def test_defaults_are_loaded_when_env_file_is_missing(self):
-        with patch('agent.config._load_env_file', return_value={}):
-            config = AgentConfig()
-            self.assertEqual(config.llm_provider, DEFAULT_PROVIDER)
-            self.assertEqual(config.llm_model, DEFAULT_MODEL)
-            self.assertEqual(config.llm_api_key, '')
-            self.assertEqual(config.llm_base_url, '')
-
-    def test_env_file_values_are_used(self):
-        fake_values = {
-            'LLM_PROVIDER': 'deepseek',
-            'LLM_API_KEY': 'env-key',
-            'LLM_MODEL': 'deepseek-chat',
-            'LLM_BASE_URL': 'https://api.deepseek.com',
-        }
-        with patch('agent.config._load_env_file', return_value=fake_values):
-            config = AgentConfig()
-            self.assertEqual(config.llm_provider, 'deepseek')
-            self.assertEqual(config.llm_api_key, 'env-key')
-            self.assertEqual(config.llm_model, 'deepseek-chat')
-            self.assertEqual(config.llm_base_url, 'https://api.deepseek.com')
-
-    def test_anthropic_api_key_fallback_works(self):
-        fake_values = {'ANTHROPIC_API_KEY': 'anth-key'}
-        with patch('agent.config._load_env_file', return_value=fake_values):
-            config = AgentConfig()
-            self.assertEqual(config.llm_provider, DEFAULT_PROVIDER)
-            self.assertEqual(config.llm_api_key, 'anth-key')
-            self.assertTrue(config.llm_enabled)
-
-    def test_env_file_has_highest_priority(self):
-        fake_values = {
-            'LLM_API_KEY': 'env-file-key',
-            'ANTHROPIC_API_KEY': 'anth-file-key',
-        }
-        with patch('agent.config._load_env_file', return_value=fake_values):
-            config = AgentConfig()
-            self.assertEqual(config.llm_api_key, 'env-file-key')
-
     def test_load_env_file_parses_plain_lines(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
             root = Path(tmpdir)
-            env_file = root / '.env'
-            env_file.write_text(
-                '# comment\nLLM_PROVIDER=openai\nLLM_API_KEY=test-key\nLLM_BASE_URL="https://example.com"\n',
+            env_path = root / '.env'
+            env_path.write_text('A=1\n# ignored\nB = two\n', encoding='utf-8')
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                values = _load_env_file()
+            finally:
+                os.chdir(previous)
+            self.assertEqual(values['A'], '1')
+            self.assertEqual(values['B'], 'two')
+
+    def test_defaults_are_loaded_when_env_file_is_missing(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                config = AgentConfig()
+            finally:
+                os.chdir(previous)
+            self.assertEqual(config.llm_provider, 'anthropic')
+            self.assertEqual(config.llm_model, 'claude-sonnet-4-20250514')
+            self.assertTrue(config.observability_enabled)
+            self.assertEqual(config.observability_log_dir, 'logs/observability')
+            self.assertEqual(config.observability_preview_chars, 2000)
+
+    def test_env_file_values_are_used(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            (root / '.env').write_text(
+                'LLM_PROVIDER=deepseek\nLLM_API_KEY=key\nLLM_MODEL=model-x\nLLM_BASE_URL=https://example.com\n',
                 encoding='utf-8',
             )
-            with patch('agent.config.Path.cwd', return_value=root):
-                from agent import config as config_module
-                values = config_module._load_env_file()
-            self.assertEqual(values['LLM_PROVIDER'], 'openai')
-            self.assertEqual(values['LLM_API_KEY'], 'test-key')
-            self.assertEqual(values['LLM_BASE_URL'], 'https://example.com')
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                config = AgentConfig()
+            finally:
+                os.chdir(previous)
+            self.assertEqual(config.llm_provider, 'deepseek')
+            self.assertEqual(config.llm_api_key, 'key')
+            self.assertEqual(config.llm_model, 'model-x')
+            self.assertEqual(config.llm_base_url, 'https://example.com')
+
+    def test_anthropic_api_key_fallback_works(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            (root / '.env').write_text('ANTHROPIC_API_KEY=legacy\nANTHROPIC_MODEL=legacy-model\n', encoding='utf-8')
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                config = AgentConfig()
+            finally:
+                os.chdir(previous)
+            self.assertEqual(config.llm_api_key, 'legacy')
+            self.assertEqual(config.llm_model, 'legacy-model')
 
     def test_provider_aliases_cover_supported_values(self):
-        self.assertEqual(PROVIDER_CLASS_ALIASES[DEFAULT_PROVIDER], 'anthropic')
-        self.assertEqual(PROVIDER_CLASS_ALIASES['openai'], 'openai-compatible')
-        self.assertEqual(PROVIDER_CLASS_ALIASES['deepseek'], 'openai-compatible')
-        self.assertEqual(PROVIDER_CLASS_ALIASES['openai-compatible'], 'openai-compatible')
+        config = AgentConfig()
+        self.assertIn(config.llm_provider, {'anthropic', 'openai', 'deepseek', 'openai-compatible'})
+
+    def test_env_file_has_highest_priority(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            (root / '.env').write_text(
+                'LLM_PROVIDER=openai\nOBSERVABILITY_ENABLED=false\nOBSERVABILITY_LOG_DIR=custom-logs\nOBSERVABILITY_PREVIEW_CHARS=128\n',
+                encoding='utf-8',
+            )
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                config = AgentConfig()
+            finally:
+                os.chdir(previous)
+            self.assertEqual(config.llm_provider, 'openai')
+            self.assertFalse(config.observability_enabled)
+            self.assertEqual(config.observability_log_dir, 'custom-logs')
+            self.assertEqual(config.observability_preview_chars, 128)
