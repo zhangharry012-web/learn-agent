@@ -5,7 +5,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from agent import config as config_module
 from agent.config import (
     DEFAULT_MODEL,
     DEFAULT_PROVIDER,
@@ -92,7 +91,7 @@ class ToolTests(unittest.TestCase):
 
 class ConfigTests(unittest.TestCase):
     def test_defaults_are_loaded_when_env_file_is_missing(self):
-        with patch.object(config_module, '_ENV_VALUES', {}):
+        with patch('agent.config._load_env_file', return_value={}):
             config = AgentConfig()
             self.assertEqual(config.llm_provider, DEFAULT_PROVIDER)
             self.assertEqual(config.llm_model, DEFAULT_MODEL)
@@ -106,7 +105,7 @@ class ConfigTests(unittest.TestCase):
             'LLM_MODEL': 'deepseek-chat',
             'LLM_BASE_URL': 'https://api.deepseek.com',
         }
-        with patch.object(config_module, '_ENV_VALUES', fake_values):
+        with patch('agent.config._load_env_file', return_value=fake_values):
             config = AgentConfig()
             self.assertEqual(config.llm_provider, 'deepseek')
             self.assertEqual(config.llm_api_key, 'env-key')
@@ -115,11 +114,20 @@ class ConfigTests(unittest.TestCase):
 
     def test_anthropic_api_key_fallback_works(self):
         fake_values = {'ANTHROPIC_API_KEY': 'anth-key'}
-        with patch.object(config_module, '_ENV_VALUES', fake_values):
+        with patch('agent.config._load_env_file', return_value=fake_values):
             config = AgentConfig()
             self.assertEqual(config.llm_provider, DEFAULT_PROVIDER)
             self.assertEqual(config.llm_api_key, 'anth-key')
             self.assertTrue(config.llm_enabled)
+
+    def test_env_file_has_highest_priority(self):
+        fake_values = {
+            'LLM_API_KEY': 'env-file-key',
+            'ANTHROPIC_API_KEY': 'anth-file-key',
+        }
+        with patch('agent.config._load_env_file', return_value=fake_values):
+            config = AgentConfig()
+            self.assertEqual(config.llm_api_key, 'env-file-key')
 
     def test_load_env_file_parses_plain_lines(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
@@ -130,6 +138,7 @@ class ConfigTests(unittest.TestCase):
                 encoding='utf-8',
             )
             with patch('agent.config.Path.cwd', return_value=root):
+                from agent import config as config_module
                 values = config_module._load_env_file()
             self.assertEqual(values['LLM_PROVIDER'], 'openai')
             self.assertEqual(values['LLM_API_KEY'], 'test-key')

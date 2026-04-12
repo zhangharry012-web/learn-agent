@@ -30,11 +30,9 @@ def _load_env_file() -> Dict[str, str]:
     return values
 
 
-_ENV_VALUES = _load_env_file()
-
-
 def _get_env_value(key: str, default: str = '') -> str:
-    return _ENV_VALUES.get(key, default)
+    env_file_values = _load_env_file()
+    return env_file_values.get(key, default)
 
 
 @dataclass
