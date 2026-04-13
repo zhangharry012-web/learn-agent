@@ -217,6 +217,31 @@ find logs/observability/sessions -type f | sort
 grep '"event_type": "llm.response.completed"' logs/observability/events/$(date -u +%F)/$(date -u +%H).jsonl
 ```
 
+## Read-Only Git Inspection Tool
+
+The agent now also exposes an approval-free `git_inspect` tool for a small read-only git subset. This avoids using the broader approval-gated `git_run` tool for common repository inspection requests.
+
+Supported subcommands:
+
+- `git status`
+- `git diff`
+- `git log`
+- `git show`
+
+Safety characteristics:
+
+- only a fixed read-only subcommand set is allowed
+- inline git config overrides are rejected
+- broader git mutations still require approval through `git_run`
+
+Example tool payloads:
+
+```json
+{"args": "status --short"}
+{"args": "diff -- README.md"}
+{"args": "log --oneline -5"}
+```
+
 ## Read-Only Inspection Tool
 
 The agent now exposes an approval-free `inspect_path` tool for common workspace inspection tasks that do not need arbitrary shell execution. It is limited to read-only actions and is intended to cover the most common folder-viewing requests before falling back to the approval-gated `exec` tool.

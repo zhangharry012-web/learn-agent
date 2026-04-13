@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from agent.shell import ShellResult
-from agent.tools import EditFileTool, ExecTool, GitTool, InspectPathTool, ReadFileTool, WriteFileTool, build_tools
+from agent.tools import EditFileTool, ExecTool, GitInspectTool, GitTool, InspectPathTool, ReadFileTool, WriteFileTool, build_tools
 from tests.helpers import FakeShellRunner
 
 
@@ -114,7 +114,7 @@ class ToolTests(unittest.TestCase):
 
             self.assertEqual(
                 set(tools),
-                {'read_file', 'write_file', 'edit_file', 'git_run', 'exec', 'inspect_path'},
+                {'read_file', 'write_file', 'edit_file', 'git_run', 'git_inspect', 'exec', 'inspect_path'},
             )
 
     def test_inspect_path_tool_uses_argv_for_ls(self):
@@ -190,3 +190,27 @@ class ToolTests(unittest.TestCase):
             payload = json.loads(result.content)
             self.assertEqual(payload['stdout'], '.')
             self.assertEqual(payload['stderr'], '')
+
+
+    def test_git_inspect_tool_allows_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shell_runner = FakeShellRunner(
+                ShellResult(command='git status --short', returncode=0, stdout='M a.py', stderr='')
+            )
+            tool = GitInspectTool(root, shell_runner)
+
+            result = tool.execute({'args': 'status --short'})
+
+            self.assertTrue(result.ok)
+            self.assertEqual(shell_runner.argv_calls[0]['argv'], ['git', 'status', '--short'])
+
+    def test_git_inspect_tool_rejects_mutating_subcommand(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tool = GitInspectTool(root, FakeShellRunner(ShellResult(command='git add .', returncode=0, stdout='', stderr='')))
+
+            result = tool.execute({'args': 'add .'})
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.content, 'Only read-only git inspect commands are allowed.')
