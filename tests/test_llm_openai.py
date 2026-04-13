@@ -2,10 +2,11 @@ import unittest
 from types import SimpleNamespace
 
 from agent.llm.openai_client import OpenAICompatibleLLM
+from agent.llm.types import LLMToolCallFormatError
 
 
 class OpenAIParsingTests(unittest.TestCase):
-    def test_invalid_tool_arguments_raise(self):
+    def test_invalid_tool_arguments_raise_format_error(self):
         response = SimpleNamespace(
             choices=[
                 SimpleNamespace(
@@ -23,7 +24,28 @@ class OpenAIParsingTests(unittest.TestCase):
             ]
         )
         llm = OpenAICompatibleLLM.__new__(OpenAICompatibleLLM)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(LLMToolCallFormatError):
+            llm._parse_response(response)
+
+    def test_non_object_tool_arguments_raise_format_error(self):
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason='tool_calls',
+                    message=SimpleNamespace(
+                        content='',
+                        tool_calls=[
+                            SimpleNamespace(
+                                id='call_1',
+                                function=SimpleNamespace(name='read_file', arguments='[1, 2, 3]'),
+                            )
+                        ],
+                    ),
+                )
+            ]
+        )
+        llm = OpenAICompatibleLLM.__new__(OpenAICompatibleLLM)
+        with self.assertRaises(LLMToolCallFormatError):
             llm._parse_response(response)
 
     def test_openai_stop_reason_normalization(self):

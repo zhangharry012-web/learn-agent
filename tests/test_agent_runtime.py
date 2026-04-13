@@ -8,8 +8,11 @@ from typing import Tuple
 from agent.config import AgentConfig
 from agent.core import Agent
 from agent.llm import LLMResponse, TokenUsage, ToolCall
+from agent.llm.types import LLMToolCallFormatError
+from agent.runtime.agent import LLM_PANIC_RETRY_MESSAGE
 from agent.runtime.events import (
     COMMAND_RECEIVED,
+    LLM_PANIC,
     LLM_RESPONSE_COMPLETED,
     SHELL_EXECUTION_COMPLETED,
     TOOL_APPROVAL_COMPLETED,
@@ -30,6 +33,31 @@ def _utc_partition_paths(root: Path, session_id: str, moment: datetime) -> Tuple
     events_path = root / 'logs' / 'observability' / 'events' / date_part / hour_file
     session_path = root / 'logs' / 'observability' / 'sessions' / session_id / date_part / hour_file
     return events_path, session_path
+
+
+class RetryFormatErrorLLM:
+    has_failed_once = False
+
+    def __init__(self):
+        self.calls = []
+        self.max_tokens = 8192
+
+    def generate(self, **kwargs):
+        self.calls.append(kwargs)
+        if not RetryFormatErrorLLM.has_failed_once:
+            RetryFormatErrorLLM.has_failed_once = True
+            raise LLMToolCallFormatError('Invalid tool arguments from provider')
+        return LLMResponse(text='Recovered after retry.', tool_calls=[], stop_reason='end_turn')
+
+
+class AlwaysPanicLLM:
+    def __init__(self):
+        self.calls = []
+        self.max_tokens = 8192
+
+    def generate(self, **kwargs):
+        self.calls.append(kwargs)
+        raise RuntimeError('boom')
 
 
 class AgentLLMTests(unittest.TestCase):
@@ -361,3 +389,55 @@ class AgentLLMTests(unittest.TestCase):
             self.assertFalse(response.awaiting_confirmation)
             self.assertEqual(response.message, 'File summary inspected.')
             self.assertEqual(shell_runner.argv_calls[0]['argv'], ['wc', '-l', 'README.md'])
+
+    def test_llm_tool_call_format_error_retries_with_fallback_max_tokens(self):
+        RetryFormatErrorLLM.has_failed_once = False
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            config = AgentConfig(
+                llm_api_key='test',
+                llm_max_tokens=8192,
+                llm_fallback_max_tokens=16384,
+            )
+            agent = Agent(
+                llm=RetryFormatErrorLLM(),
+                config=config,
+                workspace_root=root,
+                observability_logger=ObservabilityLogger(root / 'logs' / 'observability'),
+            )
+
+            def rebuild(max_tokens=None):
+                replacement = RetryFormatErrorLLM()
+                replacement.max_tokens = max_tokens or 0
+                return replacement
+
+            agent._build_default_llm = rebuild
+            response = agent.handle('retry on malformed tool call')
+
+            self.assertTrue(response.ok)
+            self.assertEqual(response.message, 'Recovered after retry.')
+            self.assertEqual(agent.current_llm_max_tokens, 16384)
+
+    def test_llm_panic_writes_exception_log_and_returns_retry_message(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            logger = ObservabilityLogger(root / 'logs' / 'observability')
+            agent = Agent(
+                llm=AlwaysPanicLLM(),
+                config=AgentConfig(llm_api_key='test', exception_log_dir='logs/exceptions'),
+                workspace_root=root,
+                observability_logger=logger,
+            )
+            response = agent.handle('cause panic')
+
+            self.assertFalse(response.ok)
+            self.assertEqual(response.stderr, LLM_PANIC_RETRY_MESSAGE)
+            exception_logs = sorted((root / 'logs' / 'exceptions').rglob('*.json'))
+            self.assertTrue(exception_logs)
+            payload = json.loads(exception_logs[0].read_text(encoding='utf-8'))
+            self.assertEqual(payload['error_type'], 'RuntimeError')
+            self.assertIn('boom', payload['error_message'])
+            events_path = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))[0]
+            events = _read_events(events_path)
+            panic_event = next(event for event in events if event['event_type'] == LLM_PANIC)
+            self.assertEqual(panic_event['payload']['error_type'], 'RuntimeError')

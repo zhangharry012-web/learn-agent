@@ -6,6 +6,8 @@ from typing import Dict, FrozenSet, Mapping, Tuple
 
 DEFAULT_PROVIDER = 'anthropic'
 DEFAULT_MODEL = 'claude-sonnet-4-20250514'
+DEFAULT_LLM_MAX_TOKENS = 8 * 1024
+FALLBACK_LLM_MAX_TOKENS = 16 * 1024
 ENV_FILE_NAME = '.env'
 SUPPORTED_OPENAI_COMPATIBLE_PROVIDERS: FrozenSet[str] = frozenset(
     {'openai', 'deepseek', 'openai-compatible'}
@@ -62,7 +64,12 @@ class AgentConfig:
         default_factory=lambda: _get_env_value('LLM_MODEL') or _get_env_value('ANTHROPIC_MODEL', DEFAULT_MODEL)
     )
     llm_base_url: str = field(default_factory=lambda: _get_env_value('LLM_BASE_URL'))
-    llm_max_tokens: int = 1024
+    llm_max_tokens: int = field(
+        default_factory=lambda: _get_env_int('LLM_MAX_TOKENS', DEFAULT_LLM_MAX_TOKENS)
+    )
+    llm_fallback_max_tokens: int = field(
+        default_factory=lambda: _get_env_int('LLM_FALLBACK_MAX_TOKENS', FALLBACK_LLM_MAX_TOKENS)
+    )
     enabled_tools: Tuple[str, ...] = (
         'read_file',
         'write_file',
@@ -82,6 +89,9 @@ class AgentConfig:
     )
     observability_retention_hours: int = field(
         default_factory=lambda: _get_env_int('OBSERVABILITY_RETENTION_HOURS', 24 * 30)
+    )
+    exception_log_dir: str = field(
+        default_factory=lambda: _get_env_value('EXCEPTION_LOG_DIR', 'logs/exceptions')
     )
 
     @property

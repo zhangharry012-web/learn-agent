@@ -7,12 +7,14 @@ from typing import Any, Dict, List, Optional
 
 from agent.config import AgentConfig
 from agent.llm import BaseLLMClient, ToolResult, create_llm, extract_text
+from agent.llm.types import LLMToolCallFormatError
 from agent.policy import CommandPolicy
 from agent.runtime.events import (
     COMMAND_BLOCKED,
     COMMAND_COMPLETED,
     COMMAND_RECEIVED,
     LLM_LOOP_LIMIT_EXCEEDED,
+    LLM_PANIC,
     LLM_RESPONSE_COMPLETED,
     SHELL_EXECUTION_COMPLETED,
     TOOL_APPROVAL_COMPLETED,
@@ -30,6 +32,7 @@ from agent.shell import ShellRunner
 from agent.tools import ToolExecutionResult, build_tools
 
 MAX_LLM_TOOL_STEPS = 8
+LLM_PANIC_RETRY_MESSAGE = 'LLM 调用发生内部错误，已记录异常日志。请发送错误并重新尝试。'
 
 
 class Agent:
@@ -46,7 +49,8 @@ class Agent:
         self.shell_runner = shell_runner or ShellRunner()
         self.policy = policy or CommandPolicy()
         self.workspace_root = (workspace_root or Path.cwd()).resolve()
-        self.llm = llm or self._build_default_llm()
+        self.current_llm_max_tokens = self.config.llm_max_tokens
+        self.llm = llm or self._build_default_llm(self.current_llm_max_tokens)
         self.tools = build_tools(
             workspace_root=self.workspace_root,
             shell_runner=self.shell_runner,
@@ -61,17 +65,26 @@ class Agent:
             preview_chars=self.config.observability_preview_chars,
             retention_hours=self.config.observability_retention_hours,
         )
+        self.exception_log_dir = self.workspace_root / self.config.exception_log_dir
 
-    def _build_default_llm(self) -> Optional[BaseLLMClient]:
+    def _build_default_llm(self, max_tokens: Optional[int] = None) -> Optional[BaseLLMClient]:
         if not self.config.llm_enabled:
             return None
         return create_llm(
             provider=self.config.llm_provider,
             api_key=self.config.llm_api_key,
             model=self.config.llm_model,
-            max_tokens=self.config.llm_max_tokens,
+            max_tokens=max_tokens if max_tokens is not None else self.current_llm_max_tokens,
             base_url=self.config.llm_base_url,
         )
+
+    def _upgrade_llm_max_tokens(self) -> bool:
+        fallback_max_tokens = self.config.llm_fallback_max_tokens
+        if fallback_max_tokens <= self.current_llm_max_tokens:
+            return False
+        self.current_llm_max_tokens = fallback_max_tokens
+        self.llm = self._build_default_llm(self.current_llm_max_tokens)
+        return self.llm is not None
 
     def handle(self, command: str) -> AgentResponse:
         started_at = time.perf_counter()
@@ -229,13 +242,22 @@ class Agent:
                 returncode=1,
             )
         working_messages = list(messages)
+        format_retry_used = False
         for step in range(MAX_LLM_TOOL_STEPS):
             started_at = time.perf_counter()
-            response = self.llm.generate(
-                system_prompt=build_system_prompt(),
-                messages=working_messages,
-                tools=[tool.definition() for tool in self.tools.values()],
-            )
+            try:
+                response = self.llm.generate(
+                    system_prompt=build_system_prompt(),
+                    messages=working_messages,
+                    tools=[tool.definition() for tool in self.tools.values()],
+                )
+            except LLMToolCallFormatError as exc:
+                if not format_retry_used and self._upgrade_llm_max_tokens():
+                    format_retry_used = True
+                    continue
+                return self._handle_llm_panic(exc, original_command, step + 1, working_messages)
+            except Exception as exc:
+                return self._handle_llm_panic(exc, original_command, step + 1, working_messages)
             self.observability.log_event(
                 LLM_RESPONSE_COMPLETED,
                 self.session_id,
@@ -243,6 +265,7 @@ class Agent:
                     'step': step + 1,
                     'provider': self.config.llm_provider,
                     'model': self.config.llm_model,
+                    'max_tokens': self.current_llm_max_tokens,
                     'message_count': len(working_messages),
                     'tool_count': len(self.tools),
                     'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
@@ -339,5 +362,44 @@ class Agent:
             ok=False,
             command=original_command,
             stderr='LLM tool loop exceeded the maximum number of steps.',
+            returncode=1,
+        )
+
+    def _handle_llm_panic(
+        self,
+        error: Exception,
+        original_command: str,
+        step: int,
+        messages: List[Dict[str, Any]],
+    ) -> AgentResponse:
+        exception_path = self.observability.log_exception(
+            self.session_id,
+            error,
+            {
+                'command': original_command,
+                'step': step,
+                'provider': self.config.llm_provider,
+                'model': self.config.llm_model,
+                'max_tokens': self.current_llm_max_tokens,
+                'message_count': len(messages),
+            },
+            self.exception_log_dir,
+        )
+        self.observability.log_event(
+            LLM_PANIC,
+            self.session_id,
+            {
+                'command': original_command,
+                'step': step,
+                'error_type': error.__class__.__name__,
+                'error_message': str(error),
+                'max_tokens': self.current_llm_max_tokens,
+                'exception_log_path': str(exception_path) if exception_path is not None else '',
+            },
+        )
+        return AgentResponse(
+            ok=False,
+            command=original_command,
+            stderr=LLM_PANIC_RETRY_MESSAGE,
             returncode=1,
         )

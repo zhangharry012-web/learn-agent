@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import traceback
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple
@@ -53,6 +55,24 @@ class ObservabilityLogger:
             self._cleanup_if_needed(now)
         except Exception:
             return
+
+    def log_exception(self, session_id: str, error: Exception, payload: Dict[str, Any], log_dir: Path) -> Optional[Path]:
+        now = datetime.now(timezone.utc)
+        entry = {
+            'timestamp': self._format_timestamp(now),
+            'session_id': session_id,
+            'error_type': error.__class__.__name__,
+            'error_message': str(error),
+            'payload': self.preview(payload),
+            'traceback': traceback.format_exc(),
+        }
+        try:
+            path = log_dir / now.strftime(DATE_FORMAT) / (uuid.uuid4().hex + '.json')
+            self._ensure_parent(path)
+            path.write_text(json.dumps(entry, ensure_ascii=False, indent=2), encoding='utf-8')
+            return path
+        except Exception:
+            return None
 
     def preview(self, value: Any) -> Any:
         if isinstance(value, str):

@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 
+class LLMToolCallFormatError(ValueError):
+    pass
+
+
 @dataclass
 class ToolCall:
     id: str

@@ -4,7 +4,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from agent.llm.base import BaseLLMClient
-from agent.llm.types import LLMResponse, TokenUsage, ToolCall
+from agent.llm.types import LLMResponse, LLMToolCallFormatError, TokenUsage, ToolCall
 
 try:
     from openai import OpenAI
@@ -115,9 +115,9 @@ class OpenAICompatibleLLM(BaseLLMClient):
             try:
                 parsed = json.loads(arguments)
             except json.JSONDecodeError as exc:
-                raise ValueError('Invalid tool arguments from provider') from exc
+                raise LLMToolCallFormatError('Invalid tool arguments from provider') from exc
             if not isinstance(parsed, dict):
-                raise ValueError('Invalid tool arguments from provider')
+                raise LLMToolCallFormatError('Invalid tool arguments from provider')
             tool_calls.append(
                 ToolCall(
                     id=str(tool_call.id),
