@@ -63,7 +63,7 @@ class AgentConfig:
     )
     llm_base_url: str = field(default_factory=lambda: _get_env_value('LLM_BASE_URL'))
     llm_max_tokens: int = 1024
-    enabled_tools: Tuple[str, ...] = ('read_file', 'write_file', 'edit_file', 'git_run', 'exec')
+    enabled_tools: Tuple[str, ...] = ('read_file', 'write_file', 'edit_file', 'git_run', 'exec', 'inspect_path')
     observability_enabled: bool = field(default_factory=lambda: _get_env_bool('OBSERVABILITY_ENABLED', True))
     observability_log_dir: str = field(
         default_factory=lambda: _get_env_value('OBSERVABILITY_LOG_DIR', 'logs/observability')

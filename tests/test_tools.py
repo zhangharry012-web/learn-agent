@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from agent.shell import ShellResult
-from agent.tools import EditFileTool, ExecTool, GitTool, ReadFileTool, WriteFileTool, build_tools
+from agent.tools import EditFileTool, ExecTool, GitTool, InspectPathTool, ReadFileTool, WriteFileTool, build_tools
 from tests.helpers import FakeShellRunner
 
 
@@ -114,5 +114,45 @@ class ToolTests(unittest.TestCase):
 
             self.assertEqual(
                 set(tools),
-                {'read_file', 'write_file', 'edit_file', 'git_run', 'exec'},
+                {'read_file', 'write_file', 'edit_file', 'git_run', 'exec', 'inspect_path'},
             )
+
+    def test_inspect_path_tool_uses_argv_for_ls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shell_runner = FakeShellRunner(
+                ShellResult(command='ls -1 .', returncode=0, stdout='a.py\nb.py', stderr='')
+            )
+            tool = InspectPathTool(root, shell_runner)
+
+            result = tool.execute({'action': 'ls', 'path': '.'})
+
+            self.assertTrue(result.ok)
+            self.assertEqual(shell_runner.argv_calls[0]['argv'][:2], ['ls', '-1'])
+            payload = json.loads(result.content)
+            self.assertEqual(payload['entries'], ['a.py', 'b.py'])
+
+    def test_inspect_path_tool_uses_argv_for_find(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shell_runner = FakeShellRunner(
+                ShellResult(command='find .', returncode=0, stdout=str(root) + '\n' + str(root / 'agent'), stderr='')
+            )
+            tool = InspectPathTool(root, shell_runner)
+
+            result = tool.execute({'action': 'find', 'path': '.', 'max_depth': 2})
+
+            self.assertTrue(result.ok)
+            self.assertEqual(shell_runner.argv_calls[0]['argv'][:3], ['find', str(root), '-maxdepth'])
+            payload = json.loads(result.content)
+            self.assertEqual(payload['entries'], ['.', 'agent'])
+
+    def test_inspect_path_tool_rejects_missing_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tool = InspectPathTool(root, FakeShellRunner(ShellResult(command='pwd', returncode=0, stdout='', stderr='')))
+
+            result = tool.execute({'action': 'ls', 'path': 'missing'})
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.content, 'Target path does not exist.')

@@ -243,3 +243,34 @@ class AgentLLMTests(unittest.TestCase):
             logger.log_event(COMMAND_RECEIVED, 'active-session', {'command': 'hello'})
             self.assertTrue(malformed.exists())
             self.assertTrue(recent_session_path.exists())
+
+
+    def test_inspect_path_executes_without_approval(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            shell_runner = FakeShellRunner(ShellResult(command='pwd', returncode=0, stdout=str(root), stderr=''))
+            llm = FakeLLM(
+                [
+                    LLMResponse(
+                        text='',
+                        tool_calls=[ToolCall(id='toolu_inspect_1', name='inspect_path', arguments={'action': 'pwd'})],
+                        stop_reason='tool_use',
+                    ),
+                    LLMResponse(text='Workspace inspected.', tool_calls=[], stop_reason='end_turn'),
+                ]
+            )
+            logger = ObservabilityLogger(root / 'logs' / 'observability')
+            agent = Agent(
+                llm=llm,
+                shell_runner=shell_runner,
+                config=AgentConfig(llm_api_key='test'),
+                workspace_root=root,
+                observability_logger=logger,
+            )
+
+            response = agent.handle('show me the workspace path')
+
+            self.assertTrue(response.ok)
+            self.assertFalse(response.awaiting_confirmation)
+            self.assertEqual(response.message, 'Workspace inspected.')
+            self.assertEqual(shell_runner.argv_calls[0]['argv'], ['pwd'])

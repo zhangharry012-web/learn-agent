@@ -217,6 +217,33 @@ find logs/observability/sessions -type f | sort
 grep '"event_type": "llm.response.completed"' logs/observability/events/$(date -u +%F)/$(date -u +%H).jsonl
 ```
 
+## Read-Only Inspection Tool
+
+The agent now exposes an approval-free `inspect_path` tool for common workspace inspection tasks that do not need arbitrary shell execution. It is limited to read-only actions and is intended to cover the most common folder-viewing requests before falling back to the approval-gated `exec` tool.
+
+Supported actions:
+
+- `pwd`
+- `ls`
+- `find`
+- `du`
+
+Safety characteristics:
+
+- workspace-bounded paths only
+- argv-based subprocess execution instead of arbitrary shell text
+- no write, delete, move, or network behavior
+- `exec` remains approval-gated for anything broader
+
+Example tool payloads:
+
+```json
+{"action": "pwd"}
+{"action": "ls", "path": "agent"}
+{"action": "find", "path": "agent", "max_depth": 2}
+{"action": "du", "path": "tests"}
+```
+
 ## Example Commands
 
 Inside the interactive shell:
@@ -250,6 +277,7 @@ This project is intentionally structured for machine readability and automation:
 - Observability expansion research: [docs/observability-expansion/research.md](docs/observability-expansion/research.md)
 - Observability rotation plan: [docs/observability-rotation/plan.md](docs/observability-rotation/plan.md)
 - Observability rotation research: [docs/observability-rotation/research.md](docs/observability-rotation/research.md)
+- Read-only inspection research: [docs/read-only-inspection/research.md](docs/read-only-inspection/research.md)
 - Multi-provider design notes: [docs/multi-llm-provider/plan.md](docs/multi-llm-provider/plan.md)
 - Multi-provider research notes: [docs/multi-llm-provider/research.md](docs/multi-llm-provider/research.md)
 
