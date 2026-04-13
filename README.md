@@ -41,8 +41,6 @@ learn-agent/
 ├── .env.example
 ├── LICENSE
 ├── main.py
-├── plan.md
-├── research.md
 ├── requirements.txt
 ├── agent/
 │   ├── __init__.py
@@ -71,6 +69,13 @@ learn-agent/
 │       ├── base.py
 │       ├── openai_client.py
 │       └── types.py
+├── docs/
+│   ├── architecture.md
+│   ├── observability-expansion/
+│   │   ├── plan.md
+│   │   └── research.md
+│   ├── multi-llm-provider/
+│   └── project-structure-refactor/
 ├── tests/
 │   ├── helpers.py
 │   ├── test_agent_runtime.py
@@ -80,10 +85,10 @@ learn-agent/
 │   ├── test_llm_openai.py
 │   ├── test_policy.py
 │   └── test_tools.py
-└── docs/
-    ├── architecture.md
-    ├── multi-llm-provider/
-    └── project-structure-refactor/
+└── logs/
+    └── observability/
+        ├── events.jsonl
+        └── sessions/
 ```
 
 ## Quick Start
@@ -155,6 +160,7 @@ The agent writes structured observability logs to a dedicated directory by defau
 
 ```text
 logs/observability/events.jsonl
+logs/observability/sessions/<session_id>.jsonl
 ```
 
 The JSONL stream includes events for:
@@ -170,6 +176,7 @@ Useful inspection commands:
 
 ```bash
 tail -n 20 logs/observability/events.jsonl
+ls logs/observability/sessions/
 grep '"event_type": "llm_call_completed"' logs/observability/events.jsonl
 ```
 
@@ -202,6 +209,8 @@ This project is intentionally structured for machine readability and automation:
 ## Documentation
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
+- Observability plan: [docs/observability-expansion/plan.md](docs/observability-expansion/plan.md)
+- Observability research: [docs/observability-expansion/research.md](docs/observability-expansion/research.md)
 - Multi-provider design notes: [docs/multi-llm-provider/plan.md](docs/multi-llm-provider/plan.md)
 - Multi-provider research notes: [docs/multi-llm-provider/research.md](docs/multi-llm-provider/research.md)
 
@@ -212,7 +221,7 @@ This project is intentionally structured for machine readability and automation:
 - Expand pluggable tool registry
 - Add confirmation hooks on top of the current safety denylist
 - Expand automated test coverage
-- Add log rotation or per-session trace splitting if observability volume grows
+- Add log rotation if observability volume grows further
 
 ## License
 

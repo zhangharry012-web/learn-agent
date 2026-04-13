@@ -12,8 +12,9 @@ class ObservabilityLogger:
         self.log_dir = log_dir
         self.preview_chars = preview_chars
         self.events_path = self.log_dir / 'events.jsonl'
+        self.sessions_dir = self.log_dir / 'sessions'
         if self.enabled:
-            self._ensure_dir()
+            self._ensure_dirs()
 
     def log_event(self, event_type: str, session_id: str, payload: Dict[str, Any]) -> None:
         if not self.enabled:
@@ -25,9 +26,12 @@ class ObservabilityLogger:
             'payload': self.preview(payload),
         }
         try:
-            self._ensure_dir()
+            self._ensure_dirs()
+            serialized = json.dumps(entry, ensure_ascii=False) + '\n'
             with self.events_path.open('a', encoding='utf-8') as handle:
-                handle.write(json.dumps(entry, ensure_ascii=False) + '\n')
+                handle.write(serialized)
+            with (self.sessions_dir / f'{session_id}.jsonl').open('a', encoding='utf-8') as handle:
+                handle.write(serialized)
         except Exception:
             return
 
@@ -42,8 +46,9 @@ class ObservabilityLogger:
             return [self.preview(item) for item in value]
         return value
 
-    def _ensure_dir(self) -> None:
+    def _ensure_dirs(self) -> None:
         try:
             self.log_dir.mkdir(parents=True, exist_ok=True)
+            self.sessions_dir.mkdir(parents=True, exist_ok=True)
         except Exception:
             return

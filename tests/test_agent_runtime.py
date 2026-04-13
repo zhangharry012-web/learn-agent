@@ -50,8 +50,15 @@ class AgentLLMTests(unittest.TestCase):
             self.assertTrue(second.ok)
             self.assertEqual((root / 'draft.txt').read_text(encoding='utf-8'), 'generated')
             self.assertEqual(second.message, 'File written.')
-            events = _read_events(root / 'logs' / 'observability' / 'events.jsonl')
+            events_path = root / 'logs' / 'observability' / 'events.jsonl'
+            events = _read_events(events_path)
+            session_id = events[0]['session_id']
+            session_path = root / 'logs' / 'observability' / 'sessions' / f'{session_id}.jsonl'
+            self.assertTrue(events_path.exists())
+            self.assertTrue(session_path.exists())
+            session_events = _read_events(session_path)
             event_types = {event['event_type'] for event in events}
+            self.assertEqual(len(events), len(session_events))
             self.assertIn('llm_call_completed', event_types)
             self.assertIn('tool_approval_requested', event_types)
             self.assertIn('tool_approval_decided', event_types)
