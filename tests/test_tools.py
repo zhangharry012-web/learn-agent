@@ -156,3 +156,24 @@ class ToolTests(unittest.TestCase):
 
             self.assertFalse(result.ok)
             self.assertEqual(result.content, 'Target path does not exist.')
+
+
+    def test_write_file_tool_rejects_path_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tool = WriteFileTool(root)
+
+            result = tool.execute({'path': '../escape.txt', 'content': 'hello', 'mode': 'overwrite'})
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.content, 'Path escapes the workspace root.')
+
+    def test_edit_file_tool_rejects_path_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tool = EditFileTool(root)
+
+            result = tool.execute({'path': '../escape.txt', 'search': 'a', 'replace': 'b'})
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.content, 'Path escapes the workspace root.')

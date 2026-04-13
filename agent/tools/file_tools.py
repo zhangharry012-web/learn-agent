@@ -13,7 +13,7 @@ class ReadFileTool(BaseTool):
     description = (
         'Read a local text file from the current workspace. Use this tool whenever you need '
         'to inspect project files before answering or taking action. This tool is read-only '
-        'and does not require human approval. Prefer relative paths rooted in the project.'
+        'and does not require human approval. Paths are restricted to the project root.'
     )
     input_schema = {
         'type': 'object',
@@ -57,10 +57,9 @@ class WriteFileTool(BaseTool):
     name = 'write_file'
     description = (
         'Write text to a local file in the current workspace. Use this tool only when the user '
-        'explicitly wants file content created or modified. This tool always requires human '
-        'approval before execution. The mode can be overwrite or append.'
+        'explicitly wants file content created or modified. This tool executes immediately '
+        'inside the project root and never writes outside that root. The mode can be overwrite or append.'
     )
-    requires_approval = True
     input_schema = {
         'type': 'object',
         'properties': {
@@ -117,9 +116,8 @@ class EditFileTool(BaseTool):
     description = (
         'Edit an existing local text file in the current workspace by replacing exact text. '
         'Use this tool for focused in-place updates instead of full rewrites when the change '
-        'is a clear search-and-replace. This tool always requires human approval before execution.'
+        'is a clear search-and-replace. This tool executes immediately and is restricted to the project root.'
     )
-    requires_approval = True
     input_schema = {
         'type': 'object',
         'properties': {

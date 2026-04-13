@@ -13,7 +13,6 @@ from agent.runtime.events import (
     LLM_RESPONSE_COMPLETED,
     SHELL_EXECUTION_COMPLETED,
     TOOL_APPROVAL_COMPLETED,
-    TOOL_APPROVAL_REQUESTED,
     TOOL_EXECUTION_COMPLETED,
 )
 from agent.runtime.observability import ObservabilityLogger
@@ -34,7 +33,7 @@ def _utc_partition_paths(root: Path, session_id: str, moment: datetime) -> Tuple
 
 
 class AgentLLMTests(unittest.TestCase):
-    def test_write_requires_approval_then_executes(self):
+    def test_write_executes_without_approval(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
             root = Path(tmpdir)
             llm = FakeLLM(
@@ -62,12 +61,10 @@ class AgentLLMTests(unittest.TestCase):
                 observability_logger=logger,
             )
             first = agent.handle('create a draft file')
-            self.assertTrue(first.awaiting_confirmation)
-            self.assertIn('Approve file write?', first.message)
-            second = agent.handle('yes')
-            self.assertTrue(second.ok)
+            self.assertTrue(first.ok)
+            self.assertFalse(first.awaiting_confirmation)
             self.assertEqual((root / 'draft.txt').read_text(encoding='utf-8'), 'generated')
-            self.assertEqual(second.message, 'File written.')
+            self.assertEqual(first.message, 'File written.')
             moment = datetime.now(timezone.utc)
             events_glob = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))
             self.assertTrue(events_glob)
@@ -82,13 +79,12 @@ class AgentLLMTests(unittest.TestCase):
             self.assertEqual(len(filtered_global_events), len(session_events))
             self.assertIn(COMMAND_RECEIVED, event_types)
             self.assertIn(LLM_RESPONSE_COMPLETED, event_types)
-            self.assertIn(TOOL_APPROVAL_REQUESTED, event_types)
             self.assertIn(TOOL_EXECUTION_COMPLETED, event_types)
             llm_event = next(event for event in filtered_global_events if event['event_type'] == LLM_RESPONSE_COMPLETED)
             self.assertEqual(llm_event['payload']['usage']['total_tokens'], 15)
             self.assertRegex(llm_event['timestamp'], r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$')
 
-    def test_edit_requires_approval_then_executes(self):
+    def test_edit_executes_without_approval(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
             root = Path(tmpdir)
             (root / 'draft.txt').write_text('alpha beta', encoding='utf-8')
@@ -116,12 +112,10 @@ class AgentLLMTests(unittest.TestCase):
                 observability_logger=logger,
             )
             first = agent.handle('update the draft file')
-            self.assertTrue(first.awaiting_confirmation)
-            self.assertIn('Approve file edit?', first.message)
-            second = agent.handle('yes')
-            self.assertTrue(second.ok)
+            self.assertTrue(first.ok)
+            self.assertFalse(first.awaiting_confirmation)
             self.assertEqual((root / 'draft.txt').read_text(encoding='utf-8'), 'alpha gamma')
-            self.assertEqual(second.message, 'File edited.')
+            self.assertEqual(first.message, 'File edited.')
 
     def test_exec_requires_approval_then_executes(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
@@ -274,3 +268,37 @@ class AgentLLMTests(unittest.TestCase):
             self.assertFalse(response.awaiting_confirmation)
             self.assertEqual(response.message, 'Workspace inspected.')
             self.assertEqual(shell_runner.argv_calls[0]['argv'], ['pwd'])
+
+
+    def test_write_outside_project_root_is_rejected(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            llm = FakeLLM(
+                [
+                    LLMResponse(
+                        text='',
+                        tool_calls=[
+                            ToolCall(
+                                id='toolu_write_escape_1',
+                                name='write_file',
+                                arguments={'path': '../escape.txt', 'content': 'bad', 'mode': 'overwrite'},
+                            )
+                        ],
+                        stop_reason='tool_use',
+                    ),
+                    LLMResponse(text='Write rejected.', tool_calls=[], stop_reason='end_turn'),
+                ]
+            )
+            logger = ObservabilityLogger(root / 'logs' / 'observability')
+            agent = Agent(
+                llm=llm,
+                config=AgentConfig(llm_api_key='test'),
+                workspace_root=root,
+                observability_logger=logger,
+            )
+
+            response = agent.handle('write outside root')
+
+            self.assertTrue(response.ok)
+            self.assertEqual(response.message, 'Write rejected.')
+            self.assertFalse((root.parent / 'escape.txt').exists())

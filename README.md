@@ -230,9 +230,11 @@ Supported actions:
 
 Safety characteristics:
 
-- workspace-bounded paths only
+- all file and inspection paths are restricted to the project root
+- tools reject path traversal outside that root
 - argv-based subprocess execution instead of arbitrary shell text
-- no write, delete, move, or network behavior
+- no delete, move, or network behavior
+- `write_file` and `edit_file` now execute immediately inside the project root
 - `exec` remains approval-gated for anything broader
 
 Example tool payloads:
@@ -252,7 +254,6 @@ Inside the interactive shell:
 agent> help
 agent> read the README and summarize it
 agent> create a file named notes.txt with three bullet points
-agent> yes
 agent> show me git status
 agent> no
 agent> exit
