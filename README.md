@@ -233,12 +233,6 @@ This project is intentionally structured for machine readability and automation:
 - Add confirmation hooks on top of the current safety denylist
 - Expand automated test coverage
 - Add lightweight log summary and browsing utilities for observability output
-- Add confirmation hooks on top of the current safety denylist
-- Expand automated test coverage
-- Add lightweight log summary and browsing utilities for observability output
-- Add confirmation hooks on top of the current safety denylist
-- Expand automated test coverage
-- Add log rotation if observability volume grows further
 
 ## License
 

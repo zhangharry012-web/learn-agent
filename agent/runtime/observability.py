@@ -5,6 +5,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple
 
+DATE_FORMAT = '%Y-%m-%d'
+HOUR_FORMAT = '%H'
+PARTITION_FORMAT = DATE_FORMAT + ' ' + HOUR_FORMAT
+
 DEFAULT_RETENTION_HOURS = 24 * 30
 
 
@@ -62,8 +66,8 @@ class ObservabilityLogger:
         return value
 
     def _event_paths(self, session_id: str, now: datetime) -> Tuple[Path, Path]:
-        date_part = now.strftime('%Y-%m-%d')
-        hour_part = now.strftime('%H') + '.jsonl'
+        date_part = now.strftime(DATE_FORMAT)
+        hour_part = now.strftime(HOUR_FORMAT) + '.jsonl'
         return self.events_dir / date_part / hour_part, self.sessions_dir / session_id / date_part / hour_part
 
     def _ensure_dirs(self) -> None:
@@ -119,7 +123,7 @@ class ObservabilityLogger:
         if not hour_part.endswith('.jsonl'):
             return None
         try:
-            return datetime.strptime(f'{date_part} {hour_part[:-6]}', '%Y-%m-%d %H').replace(tzinfo=timezone.utc)
+            return datetime.strptime(f'{date_part} {hour_part[:-6]}', PARTITION_FORMAT).replace(tzinfo=timezone.utc)
         except ValueError:
             return None
 
