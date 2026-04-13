@@ -177,3 +177,16 @@ class ToolTests(unittest.TestCase):
 
             self.assertFalse(result.ok)
             self.assertEqual(result.content, 'Path escapes the workspace root.')
+
+
+    def test_inspect_path_tool_pwd_returns_project_root_marker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tool = InspectPathTool(root, FakeShellRunner(ShellResult(command='pwd', returncode=0, stdout=str(root), stderr='')))
+
+            result = tool.execute({'action': 'pwd'})
+
+            self.assertTrue(result.ok)
+            payload = json.loads(result.content)
+            self.assertEqual(payload['stdout'], '.')
+            self.assertEqual(payload['stderr'], '')

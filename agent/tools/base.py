@@ -2,13 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping
 
 from agent.tools.types import ToolExecutionResult
-
-
-def workspace_root_name(workspace_root: Path) -> str:
-    return workspace_root.resolve().name or str(workspace_root.resolve())
 
 
 class BaseTool:
@@ -19,7 +15,6 @@ class BaseTool:
 
     def __init__(self, workspace_root: Path) -> None:
         self.workspace_root = workspace_root.resolve()
-        self.project_root_name = workspace_root_name(self.workspace_root)
 
     def definition(self) -> Dict[str, Any]:
         return {
@@ -41,7 +36,3 @@ class BaseTool:
         except ValueError as exc:
             raise ValueError('Path escapes the workspace root.') from exc
         return candidate
-
-
-    def resolve_project_path(self, raw_path: Optional[str] = None) -> Path:
-        return self.resolve_path(raw_path or '.')

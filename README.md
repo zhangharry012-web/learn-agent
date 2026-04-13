@@ -232,7 +232,8 @@ Safety characteristics:
 
 - all file and inspection paths are restricted to the project root
 - tools reject path traversal outside that root
-- argv-based subprocess execution instead of arbitrary shell text
+- `pwd` returns the project-root marker directly instead of invoking a subprocess
+- argv-based subprocess execution is used for bounded `ls` / `find` / `du` actions
 - no delete, move, or network behavior
 - `write_file` and `edit_file` now execute immediately inside the project root
 - `exec` remains approval-gated for anything broader

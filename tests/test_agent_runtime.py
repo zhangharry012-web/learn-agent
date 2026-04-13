@@ -267,7 +267,7 @@ class AgentLLMTests(unittest.TestCase):
             self.assertTrue(response.ok)
             self.assertFalse(response.awaiting_confirmation)
             self.assertEqual(response.message, 'Workspace inspected.')
-            self.assertEqual(shell_runner.argv_calls[0]['argv'], ['pwd'])
+            self.assertEqual(shell_runner.argv_calls, [])
 
 
     def test_write_outside_project_root_is_rejected(self):

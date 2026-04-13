@@ -79,8 +79,7 @@ class InspectPathTool(BaseTool):
         return target
 
     def _run_pwd(self) -> ToolExecutionResult:
-        result = self.shell_runner.run_argv(['pwd'], cwd=self.workspace_root)
-        return self._json_result(result.ok, {'action': 'pwd', 'path': '.', 'stdout': self.project_root_name, 'stderr': result.stderr})
+        return self._json_result(ok=True, payload={'action': 'pwd', 'path': '.', 'stdout': '.', 'stderr': ''})
 
     def _run_ls(self, target: Path, payload: Mapping[str, Any]) -> ToolExecutionResult:
         argv = ['ls', '-1']
