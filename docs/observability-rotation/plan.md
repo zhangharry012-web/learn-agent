@@ -245,6 +245,32 @@ event emitted by runtime
    -> cleanup prunes empty date/session directories when possible
 ```
 
+## Event lifecycle reference
+
+```text
+user input
+  -> command.received
+     -> built-in command
+        -> command.completed
+     -> shell fallback
+        -> command.blocked / shell.execution.completed
+        -> command.completed
+     -> llm loop
+        -> llm.response.completed
+        -> tool.approval.requested
+        -> tool.approval.completed
+        -> tool.execution.completed
+        -> llm.loop_limit.exceeded (only when the loop cap is hit)
+        -> command.completed
+```
+
+Notes:
+
+- `command.received` is the user-turn entry event. It is emitted immediately after input normalization and before any built-in, shell, approval, or LLM branch is selected.
+- `command.completed` is the matching user-turn exit event.
+- `llm.response.completed`, `tool.*`, `shell.execution.completed`, and `command.blocked` describe intermediate stages inside that same turn.
+- A single user turn may contain multiple `llm.response.completed` and `tool.execution.completed` events, but it should still begin with `command.received` and end with `command.completed` unless observability is disabled.
+
 ## Design decisions and trade-offs
 
 ### 1. Keep rotation logic inside `ObservabilityLogger`

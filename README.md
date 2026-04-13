@@ -171,7 +171,34 @@ The JSONL stream includes clearer stage-oriented events for:
 - `tool.execution.completed`
 - `shell.execution.completed`
 
+Lifecycle reference:
+
+```text
+user input
+  -> command.received
+     -> built-in command
+        -> command.completed
+     -> shell fallback
+        -> command.blocked / shell.execution.completed
+        -> command.completed
+     -> llm loop
+        -> llm.response.completed
+        -> tool.approval.requested
+        -> tool.approval.completed
+        -> tool.execution.completed
+        -> llm.loop_limit.exceeded (only when the loop cap is hit)
+        -> command.completed
+```
+
+`command.received` is the entry event for a single user turn. It is emitted immediately after the input is normalized and before the agent branches into built-in handling, shell fallback, approval handling, or the LLM loop. `command.completed` closes that same user turn, while the LLM/tool/shell events describe intermediate stages inside the turn.
+
 Each event timestamp is stored in UTC with millisecond precision for easier manual inspection.
+
+Turn boundaries vs. inner stages:
+
+- `command.received` and `command.completed` describe the outer lifecycle of one user turn.
+- `llm.response.completed`, `tool.*`, `shell.execution.completed`, and `command.blocked` describe intermediate stages inside that turn.
+- One user turn can contain multiple `llm.response.completed` or `tool.execution.completed` events, but it still starts with `command.received` and ends with `command.completed`.
 
 Useful configuration:
 
