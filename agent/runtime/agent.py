@@ -8,6 +8,17 @@ from typing import Any, Dict, List, Optional
 from agent.config import AgentConfig
 from agent.llm import BaseLLMClient, ToolResult, create_llm, extract_text
 from agent.policy import CommandPolicy
+from agent.runtime.events import (
+    COMMAND_BLOCKED,
+    COMMAND_COMPLETED,
+    COMMAND_RECEIVED,
+    LLM_LOOP_LIMIT_EXCEEDED,
+    LLM_RESPONSE_COMPLETED,
+    SHELL_EXECUTION_COMPLETED,
+    TOOL_APPROVAL_COMPLETED,
+    TOOL_APPROVAL_REQUESTED,
+    TOOL_EXECUTION_COMPLETED,
+)
 from agent.runtime.messages import (
     build_assistant_message,
     build_system_prompt,
@@ -67,7 +78,7 @@ class Agent:
         normalized = command.strip()
         mode = 'input'
         self.observability.log_event(
-            'command.received',
+            COMMAND_RECEIVED,
             self.session_id,
             {'command': command, 'normalized_command': normalized},
         )
@@ -104,7 +115,7 @@ class Agent:
             mode = 'shell_fallback'
             response = self._handle_shell_turn(normalized)
         self.observability.log_event(
-            'command.completed',
+            COMMAND_COMPLETED,
             self.session_id,
             {
                 'command': command,
@@ -125,7 +136,7 @@ class Agent:
         decision = self.policy.evaluate(command)
         if not decision.allowed:
             self.observability.log_event(
-                'command.blocked',
+                COMMAND_BLOCKED,
                 self.session_id,
                 {
                     'command': command,
@@ -141,7 +152,7 @@ class Agent:
             )
         result = self.shell_runner.run(command)
         self.observability.log_event(
-            'shell.execution.completed',
+            SHELL_EXECUTION_COMPLETED,
             self.session_id,
             {
                 'command': result.command,
@@ -170,7 +181,7 @@ class Agent:
         self.pending_approval = None
         approved = user_input.lower() in {'y', 'yes'}
         self.observability.log_event(
-            'tool.approval.completed',
+            TOOL_APPROVAL_COMPLETED,
             self.session_id,
             {
                 'tool_name': pending.tool_name,
@@ -186,7 +197,7 @@ class Agent:
             else ToolExecutionResult(ok=False, content='User denied tool execution.')
         )
         self.observability.log_event(
-            'tool.execution.completed',
+            TOOL_EXECUTION_COMPLETED,
             self.session_id,
             {
                 'tool_name': pending.tool_name,
@@ -226,7 +237,7 @@ class Agent:
                 tools=[tool.definition() for tool in self.tools.values()],
             )
             self.observability.log_event(
-                'llm.response.completed',
+                LLM_RESPONSE_COMPLETED,
                 self.session_id,
                 {
                     'step': step + 1,
@@ -269,7 +280,7 @@ class Agent:
                             tool_input=tool_input,
                         )
                         self.observability.log_event(
-                            'tool.approval.requested',
+                            TOOL_APPROVAL_REQUESTED,
                             self.session_id,
                             {
                                 'tool_name': tool_call.name,
@@ -286,7 +297,7 @@ class Agent:
                     tool_started_at = time.perf_counter()
                     result = tool.execute(tool_input)
                     self.observability.log_event(
-                        'tool.execution.completed',
+                        TOOL_EXECUTION_COMPLETED,
                         self.session_id,
                         {
                             'tool_name': tool_call.name,
@@ -317,7 +328,7 @@ class Agent:
                 message=final_text or 'No text response returned.',
             )
         self.observability.log_event(
-            'llm.loop_limit.exceeded',
+            LLM_LOOP_LIMIT_EXCEEDED,
             self.session_id,
             {
                 'command': original_command,
