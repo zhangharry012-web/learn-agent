@@ -35,6 +35,7 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(config.observability_enabled)
             self.assertEqual(config.observability_log_dir, 'logs/observability')
             self.assertEqual(config.observability_preview_chars, 2000)
+            self.assertEqual(config.observability_retention_hours, 720)
 
     def test_env_file_values_are_used(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
@@ -75,7 +76,7 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
             root = Path(tmpdir)
             (root / '.env').write_text(
-                'LLM_PROVIDER=openai\nOBSERVABILITY_ENABLED=false\nOBSERVABILITY_LOG_DIR=custom-logs\nOBSERVABILITY_PREVIEW_CHARS=128\n',
+                'LLM_PROVIDER=openai\nOBSERVABILITY_ENABLED=false\nOBSERVABILITY_LOG_DIR=custom-logs\nOBSERVABILITY_PREVIEW_CHARS=128\nOBSERVABILITY_RETENTION_HOURS=48\n',
                 encoding='utf-8',
             )
             previous = Path.cwd()
@@ -88,3 +89,16 @@ class ConfigTests(unittest.TestCase):
             self.assertFalse(config.observability_enabled)
             self.assertEqual(config.observability_log_dir, 'custom-logs')
             self.assertEqual(config.observability_preview_chars, 128)
+            self.assertEqual(config.observability_retention_hours, 48)
+
+    def test_invalid_retention_hours_falls_back_to_default(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            (root / '.env').write_text('OBSERVABILITY_RETENTION_HOURS=invalid\n', encoding='utf-8')
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                config = AgentConfig()
+            finally:
+                os.chdir(previous)
+            self.assertEqual(config.observability_retention_hours, 720)

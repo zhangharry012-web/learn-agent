@@ -71,6 +71,9 @@ class AgentConfig:
     observability_preview_chars: int = field(
         default_factory=lambda: _get_env_int('OBSERVABILITY_PREVIEW_CHARS', 2000)
     )
+    observability_retention_hours: int = field(
+        default_factory=lambda: _get_env_int('OBSERVABILITY_RETENTION_HOURS', 24 * 30)
+    )
 
     @property
     def anthropic_api_key(self) -> str:

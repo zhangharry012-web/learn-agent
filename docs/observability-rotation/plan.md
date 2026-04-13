@@ -420,15 +420,16 @@ This design leaves room for later operational enhancements without another broad
 
 ## TODO list
 
-- [ ] Create `docs/observability-rotation/research.md` if this round needs a dedicated artifact alongside the plan
-- [ ] Add `observability_retention_hours` config with env parsing and defaults in `agent/config.py`
-- [ ] Refactor `ObservabilityLogger` to resolve hourly global and session log paths
-- [ ] Add bounded cleanup cadence state to the logger
-- [ ] Implement expired rotated file cleanup and empty-directory pruning
-- [ ] Wire the new retention config into `Agent` logger construction
-- [ ] Update runtime tests to assert hourly path layout and cleanup behavior
-- [ ] Update config tests for new defaults and env overrides
-- [ ] Update `README.md` to document hourly rotation, retention, and new path examples
-- [ ] Run targeted test suites
-- [ ] Run the full test suite
-- [ ] Commit and push the completed plan round
+- [x] Create `docs/observability-rotation/research.md` if this round needs a dedicated artifact alongside the plan
+- [x] Add `observability_retention_hours` config with env parsing and defaults in `agent/config.py`
+- [x] Refactor `ObservabilityLogger` to resolve hourly global and session log paths
+- [x] Add bounded cleanup cadence state to the logger
+- [x] Implement expired rotated file cleanup and empty-directory pruning
+- [x] Wire the new retention config into `Agent` logger construction
+- [x] Update runtime tests to assert hourly path layout and cleanup behavior
+- [x] Update config tests for new defaults and env overrides
+- [x] Update `README.md` to document hourly rotation, retention, and new path examples
+- [x] Run targeted test suites
+- [x] Run the full test suite
+- [x] Commit and push the completed plan round
+

@@ -156,11 +156,11 @@ python -m agent.cli
 
 ## Observability Logs
 
-The agent writes structured observability logs to a dedicated directory by default:
+The agent writes structured observability logs to a dedicated directory by default. Logs rotate hourly using UTC date-hour partitions, and historical log files older than 30 days are cleaned up automatically unless you override the retention window.
 
 ```text
-logs/observability/events.jsonl
-logs/observability/sessions/<session_id>.jsonl
+logs/observability/events/YYYY-MM-DD/HH.jsonl
+logs/observability/sessions/<session_id>/YYYY-MM-DD/HH.jsonl
 ```
 
 The JSONL stream includes events for:
@@ -172,12 +172,21 @@ The JSONL stream includes events for:
 - shell fallback execution results
 - loop-limit failures
 
+Useful configuration:
+
+```text
+OBSERVABILITY_ENABLED=true
+OBSERVABILITY_LOG_DIR=logs/observability
+OBSERVABILITY_PREVIEW_CHARS=2000
+OBSERVABILITY_RETENTION_HOURS=720
+```
+
 Useful inspection commands:
 
 ```bash
-tail -n 20 logs/observability/events.jsonl
-ls logs/observability/sessions/
-grep '"event_type": "llm_call_completed"' logs/observability/events.jsonl
+find logs/observability/events -type f | sort
+find logs/observability/sessions -type f | sort
+grep '"event_type": "llm_call_completed"' logs/observability/events/$(date -u +%F)/$(date -u +%H).jsonl
 ```
 
 ## Example Commands
@@ -219,6 +228,9 @@ This project is intentionally structured for machine readability and automation:
 - Add command routing and intent parsing
 - Add memory and conversation persistence
 - Expand pluggable tool registry
+- Add confirmation hooks on top of the current safety denylist
+- Expand automated test coverage
+- Add lightweight log summary and browsing utilities for observability output
 - Add confirmation hooks on top of the current safety denylist
 - Expand automated test coverage
 - Add log rotation if observability volume grows further

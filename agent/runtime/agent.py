@@ -48,6 +48,7 @@ class Agent:
             log_dir=self.workspace_root / self.config.observability_log_dir,
             enabled=self.config.observability_enabled,
             preview_chars=self.config.observability_preview_chars,
+            retention_hours=self.config.observability_retention_hours,
         )
 
     def _build_default_llm(self) -> Optional[BaseLLMClient]:

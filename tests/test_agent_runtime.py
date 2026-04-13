@@ -1,7 +1,9 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Tuple
 
 from agent.config import AgentConfig
 from agent.core import Agent
@@ -13,6 +15,14 @@ from tests.helpers import FakeLLM, FakeShellRunner
 
 def _read_events(path: Path):
     return [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
+
+
+def _utc_partition_paths(root: Path, session_id: str, moment: datetime) -> Tuple[Path, Path]:
+    date_part = moment.strftime('%Y-%m-%d')
+    hour_file = moment.strftime('%H') + '.jsonl'
+    events_path = root / 'logs' / 'observability' / 'events' / date_part / hour_file
+    session_path = root / 'logs' / 'observability' / 'sessions' / session_id / date_part / hour_file
+    return events_path, session_path
 
 
 class AgentLLMTests(unittest.TestCase):
@@ -50,20 +60,23 @@ class AgentLLMTests(unittest.TestCase):
             self.assertTrue(second.ok)
             self.assertEqual((root / 'draft.txt').read_text(encoding='utf-8'), 'generated')
             self.assertEqual(second.message, 'File written.')
-            events_path = root / 'logs' / 'observability' / 'events.jsonl'
-            events = _read_events(events_path)
+            moment = datetime.now(timezone.utc)
+            events_glob = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))
+            self.assertTrue(events_glob)
+            events = _read_events(events_glob[0])
             session_id = events[0]['session_id']
-            session_path = root / 'logs' / 'observability' / 'sessions' / f'{session_id}.jsonl'
+            events_path, session_path = _utc_partition_paths(root, session_id, moment)
             self.assertTrue(events_path.exists())
             self.assertTrue(session_path.exists())
             session_events = _read_events(session_path)
-            event_types = {event['event_type'] for event in events}
-            self.assertEqual(len(events), len(session_events))
+            filtered_global_events = [event for event in _read_events(events_path) if event['session_id'] == session_id]
+            event_types = {event['event_type'] for event in filtered_global_events}
+            self.assertEqual(len(filtered_global_events), len(session_events))
             self.assertIn('llm_call_completed', event_types)
             self.assertIn('tool_approval_requested', event_types)
             self.assertIn('tool_approval_decided', event_types)
             self.assertIn('tool_executed', event_types)
-            llm_event = next(event for event in events if event['event_type'] == 'llm_call_completed')
+            llm_event = next(event for event in filtered_global_events if event['event_type'] == 'llm_call_completed')
             self.assertEqual(llm_event['payload']['usage']['total_tokens'], 15)
 
     def test_edit_requires_approval_then_executes(self):
@@ -160,7 +173,8 @@ class AgentLLMTests(unittest.TestCase):
             second = agent.handle('no')
             self.assertTrue(second.ok)
             self.assertEqual(second.message, 'Git action was not executed.')
-            events = _read_events(root / 'logs' / 'observability' / 'events.jsonl')
+            events_path = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))[0]
+            events = _read_events(events_path)
             decision = next(event for event in events if event['event_type'] == 'tool_approval_decided')
             self.assertFalse(decision['payload']['approved'])
             last_message = llm.calls[-1]['messages'][-1]
@@ -181,5 +195,27 @@ class AgentLLMTests(unittest.TestCase):
             response = agent.handle('echo hello')
             self.assertTrue(response.ok)
             self.assertEqual(response.stdout, 'hello')
-            events = _read_events(root / 'logs' / 'observability' / 'events.jsonl')
+            events_path = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))[0]
+            events = _read_events(events_path)
             self.assertIn('shell_fallback_executed', {event['event_type'] for event in events})
+
+    def test_cleanup_removes_expired_rotated_logs_and_prunes_empty_directories(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            logger = ObservabilityLogger(root / 'logs' / 'observability', retention_hours=1)
+            stale_moment = datetime.now(timezone.utc) - timedelta(hours=3)
+            stale_date = stale_moment.strftime('%Y-%m-%d')
+            stale_hour = stale_moment.strftime('%H') + '.jsonl'
+            stale_events = root / 'logs' / 'observability' / 'events' / stale_date / stale_hour
+            stale_session_dir = root / 'logs' / 'observability' / 'sessions' / 'old-session' / stale_date
+            stale_session = stale_session_dir / stale_hour
+            stale_events.parent.mkdir(parents=True, exist_ok=True)
+            stale_session.parent.mkdir(parents=True, exist_ok=True)
+            stale_events.write_text('{"old": true}\n', encoding='utf-8')
+            stale_session.write_text('{"old": true}\n', encoding='utf-8')
+            logger.log_event('command_received', 'active-session', {'command': 'hello'})
+            self.assertFalse(stale_events.exists())
+            self.assertFalse(stale_session.exists())
+            self.assertFalse(stale_session_dir.exists())
+            current_paths = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))
+            self.assertTrue(current_paths)
