@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 DATE_FORMAT = '%Y-%m-%d'
 HOUR_FORMAT = '%H'
 PARTITION_FORMAT = DATE_FORMAT + ' ' + HOUR_FORMAT
+TIMESTAMP_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
 
 DEFAULT_RETENTION_HOURS = 24 * 30
 
@@ -35,7 +36,7 @@ class ObservabilityLogger:
             return
         now = datetime.now(timezone.utc)
         entry = {
-            'timestamp': now.isoformat(),
+            'timestamp': self._format_timestamp(now),
             'event_type': event_type,
             'session_id': session_id,
             'payload': self.preview(payload),
@@ -64,6 +65,9 @@ class ObservabilityLogger:
         if isinstance(value, list):
             return [self.preview(item) for item in value]
         return value
+
+    def _format_timestamp(self, moment: datetime) -> str:
+        return moment.strftime(TIMESTAMP_FORMAT)[:-4] + 'Z'
 
     def _event_paths(self, session_id: str, now: datetime) -> Tuple[Path, Path]:
         date_part = now.strftime(DATE_FORMAT)

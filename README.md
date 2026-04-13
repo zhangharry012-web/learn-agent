@@ -163,14 +163,15 @@ logs/observability/events/YYYY-MM-DD/HH.jsonl
 logs/observability/sessions/<session_id>/YYYY-MM-DD/HH.jsonl
 ```
 
-The JSONL stream includes events for:
+The JSONL stream includes clearer stage-oriented events for:
 
-- top-level command receipt and completion
-- LLM call results, duration, stop reason, and token usage when the provider exposes it
-- tool approval requests and approval decisions
-- tool execution results and durations
-- shell fallback execution results
-- loop-limit failures
+- `command.received`, `command.completed`, and `command.blocked`
+- `llm.response.completed` and `llm.loop_limit.exceeded`
+- `tool.approval.requested` and `tool.approval.completed`
+- `tool.execution.completed`
+- `shell.execution.completed`
+
+Each event timestamp is stored in UTC with millisecond precision for easier manual inspection.
 
 Useful configuration:
 
@@ -186,7 +187,7 @@ Useful inspection commands:
 ```bash
 find logs/observability/events -type f | sort
 find logs/observability/sessions -type f | sort
-grep '"event_type": "llm_call_completed"' logs/observability/events/$(date -u +%F)/$(date -u +%H).jsonl
+grep '"event_type": "llm.response.completed"' logs/observability/events/$(date -u +%F)/$(date -u +%H).jsonl
 ```
 
 ## Example Commands

@@ -72,12 +72,13 @@ class AgentLLMTests(unittest.TestCase):
             filtered_global_events = [event for event in _read_events(events_path) if event['session_id'] == session_id]
             event_types = {event['event_type'] for event in filtered_global_events}
             self.assertEqual(len(filtered_global_events), len(session_events))
-            self.assertIn('llm_call_completed', event_types)
-            self.assertIn('tool_approval_requested', event_types)
-            self.assertIn('tool_approval_decided', event_types)
-            self.assertIn('tool_executed', event_types)
-            llm_event = next(event for event in filtered_global_events if event['event_type'] == 'llm_call_completed')
+            self.assertIn('command.received', event_types)
+            self.assertIn('llm.response.completed', event_types)
+            self.assertIn('tool.approval.requested', event_types)
+            self.assertIn('tool.execution.completed', event_types)
+            llm_event = next(event for event in filtered_global_events if event['event_type'] == 'llm.response.completed')
             self.assertEqual(llm_event['payload']['usage']['total_tokens'], 15)
+            self.assertRegex(llm_event['timestamp'], r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$')
 
     def test_edit_requires_approval_then_executes(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
@@ -175,7 +176,7 @@ class AgentLLMTests(unittest.TestCase):
             self.assertEqual(second.message, 'Git action was not executed.')
             events_path = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))[0]
             events = _read_events(events_path)
-            decision = next(event for event in events if event['event_type'] == 'tool_approval_decided')
+            decision = next(event for event in events if event['event_type'] == 'tool.approval.completed')
             self.assertFalse(decision['payload']['approved'])
             last_message = llm.calls[-1]['messages'][-1]
             self.assertEqual(last_message['role'], 'tool_result')
@@ -197,7 +198,7 @@ class AgentLLMTests(unittest.TestCase):
             self.assertEqual(response.stdout, 'hello')
             events_path = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))[0]
             events = _read_events(events_path)
-            self.assertIn('shell_fallback_executed', {event['event_type'] for event in events})
+            self.assertIn('shell.execution.completed', {event['event_type'] for event in events})
 
     def test_cleanup_removes_expired_rotated_logs_and_prunes_empty_directories(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
@@ -213,7 +214,7 @@ class AgentLLMTests(unittest.TestCase):
             stale_session.parent.mkdir(parents=True, exist_ok=True)
             stale_events.write_text('{"old": true}\n', encoding='utf-8')
             stale_session.write_text('{"old": true}\n', encoding='utf-8')
-            logger.log_event('command_received', 'active-session', {'command': 'hello'})
+            logger.log_event('command.received', 'active-session', {'command': 'hello'})
             self.assertFalse(stale_events.exists())
             self.assertFalse(stale_session.exists())
             self.assertFalse(stale_session_dir.exists())
@@ -231,6 +232,6 @@ class AgentLLMTests(unittest.TestCase):
             recent_session_path.parent.mkdir(parents=True, exist_ok=True)
             malformed.write_text('{"bad": true}\n', encoding='utf-8')
             recent_session_path.write_text('{"recent": true}\n', encoding='utf-8')
-            logger.log_event('command_received', 'active-session', {'command': 'hello'})
+            logger.log_event('command.received', 'active-session', {'command': 'hello'})
             self.assertTrue(malformed.exists())
             self.assertTrue(recent_session_path.exists())

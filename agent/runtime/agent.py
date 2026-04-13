@@ -67,7 +67,7 @@ class Agent:
         normalized = command.strip()
         mode = 'input'
         self.observability.log_event(
-            'command_received',
+            'command.received',
             self.session_id,
             {'command': command, 'normalized_command': normalized},
         )
@@ -104,7 +104,7 @@ class Agent:
             mode = 'shell_fallback'
             response = self._handle_shell_turn(normalized)
         self.observability.log_event(
-            'command_completed',
+            'command.completed',
             self.session_id,
             {
                 'command': command,
@@ -125,7 +125,7 @@ class Agent:
         decision = self.policy.evaluate(command)
         if not decision.allowed:
             self.observability.log_event(
-                'command_blocked',
+                'command.blocked',
                 self.session_id,
                 {
                     'command': command,
@@ -141,7 +141,7 @@ class Agent:
             )
         result = self.shell_runner.run(command)
         self.observability.log_event(
-            'shell_fallback_executed',
+            'shell.execution.completed',
             self.session_id,
             {
                 'command': result.command,
@@ -170,7 +170,7 @@ class Agent:
         self.pending_approval = None
         approved = user_input.lower() in {'y', 'yes'}
         self.observability.log_event(
-            'tool_approval_decided',
+            'tool.approval.completed',
             self.session_id,
             {
                 'tool_name': pending.tool_name,
@@ -186,7 +186,7 @@ class Agent:
             else ToolExecutionResult(ok=False, content='User denied tool execution.')
         )
         self.observability.log_event(
-            'tool_executed',
+            'tool.execution.completed',
             self.session_id,
             {
                 'tool_name': pending.tool_name,
@@ -226,7 +226,7 @@ class Agent:
                 tools=[tool.definition() for tool in self.tools.values()],
             )
             self.observability.log_event(
-                'llm_call_completed',
+                'llm.response.completed',
                 self.session_id,
                 {
                     'step': step + 1,
@@ -269,7 +269,7 @@ class Agent:
                             tool_input=tool_input,
                         )
                         self.observability.log_event(
-                            'tool_approval_requested',
+                            'tool.approval.requested',
                             self.session_id,
                             {
                                 'tool_name': tool_call.name,
@@ -286,7 +286,7 @@ class Agent:
                     tool_started_at = time.perf_counter()
                     result = tool.execute(tool_input)
                     self.observability.log_event(
-                        'tool_executed',
+                        'tool.execution.completed',
                         self.session_id,
                         {
                             'tool_name': tool_call.name,
@@ -317,7 +317,7 @@ class Agent:
                 message=final_text or 'No text response returned.',
             )
         self.observability.log_event(
-            'llm_loop_limit_exceeded',
+            'llm.loop_limit.exceeded',
             self.session_id,
             {
                 'command': original_command,
