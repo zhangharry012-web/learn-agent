@@ -12,9 +12,12 @@ from agent.tools.types import ToolExecutionResult
 class ExecTool(BaseTool):
     name = 'exec'
     description = (
-        'Execute a shell command directly inside the current workspace. Use this tool for '
-        'inspection, validation, or local command execution that is not specifically a git '
-        'operation. This tool always requires human approval before execution.'
+        'Execute an arbitrary shell command directly inside the current workspace. '
+        'Use this only for commands that are not covered by the narrower tools. '
+        'Do not use it for direct file reading like cat/head/tail because read_file is the correct tool for file contents. '
+        'Do not use it for directory listing like pwd/ls/find/du because inspect_path is the correct tool for workspace layout. '
+        'Do not use it for repository inspection like git status/diff/log/show because git_inspect is the correct tool. '
+        'This tool always requires human approval before execution.'
     )
     requires_approval = True
     input_schema = {
@@ -22,7 +25,10 @@ class ExecTool(BaseTool):
         'properties': {
             'command': {
                 'type': 'string',
-                'description': 'Shell command to execute inside the workspace root.',
+                'description': (
+                    'Shell command to execute inside the workspace root. '
+                    'Use only when no narrower tool applies.'
+                ),
             }
         },
         'required': ['command'],

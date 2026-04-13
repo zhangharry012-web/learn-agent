@@ -11,9 +11,10 @@ from agent.tools.types import ToolExecutionResult
 class ReadFileTool(BaseTool):
     name = 'read_file'
     description = (
-        'Read a local text file from the current workspace. Use this tool whenever you need '
-        'to inspect project files before answering or taking action. This tool is read-only '
-        'and does not require human approval. Paths are restricted to the project root.'
+        'Read UTF-8 text file contents from the current workspace. '
+        'Use this tool whenever you need the contents of a specific file, including cat/head/tail style tasks. '
+        'Prefer start_line and end_line instead of shell commands when you only need part of a file. '
+        'This tool is read-only, does not require human approval, and is restricted to the project root.'
     )
     input_schema = {
         'type': 'object',

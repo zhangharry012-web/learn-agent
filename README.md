@@ -6,11 +6,14 @@ A Python-based AI agent project that uses the shell as its command interaction l
 
 When `.env` contains valid LLM credentials, the agent routes user requests through the configured provider and exposes local tools:
 
-- `read_file`: read local files directly without approval
-- `write_file`: write local files after explicit human approval
-- `edit_file`: edit local files through search-and-replace after explicit human approval
-- `git_run`: execute git commands after explicit human approval
-- `exec`: execute direct shell commands after explicit human approval
+- `read_file`: read UTF-8 text file contents directly without approval
+- `write_file`: write local files directly inside the project root without approval
+- `edit_file`: edit existing local files directly inside the project root without approval
+- `inspect_path`: inspect workspace layout with bounded `pwd` / `ls` / `find` / `du` actions without approval
+- `read_only_command`: run a narrow approval-free read-only command subset for `head` / `tail` / `wc` / `stat` / `file`
+- `git_inspect`: inspect repository state with a narrow read-only git subset without approval
+- `git_run`: execute broader git commands after explicit human approval
+- `exec`: execute arbitrary shell commands after explicit human approval
 
 ## Features
 
@@ -60,7 +63,10 @@ learn-agent/
 │   │   ├── base.py
 │   │   ├── exec_tool.py
 │   │   ├── file_tools.py
+│   │   ├── git_inspect_tool.py
 │   │   ├── git_tool.py
+│   │   ├── inspect_tool.py
+│   │   ├── read_only_command_tool.py
 │   │   ├── registry.py
 │   │   └── types.py
 │   └── llm/
@@ -71,6 +77,8 @@ learn-agent/
 │       └── types.py
 ├── docs/
 │   ├── architecture.md
+│   ├── exec-safety-convergence/
+│   │   └── plan.md
 │   ├── observability-expansion/
 │   │   ├── plan.md
 │   │   └── research.md
@@ -217,9 +225,21 @@ find logs/observability/sessions -type f | sort
 grep '"event_type": "llm.response.completed"' logs/observability/events/$(date -u +%F)/$(date -u +%H).jsonl
 ```
 
+## Tool Boundary Guide
+
+The safety model now intentionally separates common inspection intents so the model can avoid the broader `exec` fallback.
+
+| Intent | Correct tool | Notes |
+|---|---|---|
+| Read the contents of a specific text file | `read_file` | This is the replacement for `cat`, and also for most `head`/`tail` style reading when exact file text is needed |
+| List directories or inspect workspace layout | `inspect_path` | Use for `pwd`, `ls`, `find`, and `du` style structure inspection |
+| Read file metadata or a lightweight summary | `read_only_command` | Use for bounded `head`, `tail`, `wc`, `stat`, and `file` |
+| Inspect git repository state/history | `git_inspect` | Use for `git status`, `git diff`, `git log`, and `git show` |
+| Run broader non-git shell commands | `exec` | Approval-gated fallback only when none of the narrower tools apply |
+
 ## Read-Only Git Inspection Tool
 
-The agent now also exposes an approval-free `git_inspect` tool for a small read-only git subset. This avoids using the broader approval-gated `git_run` tool for common repository inspection requests.
+The agent exposes an approval-free `git_inspect` tool for a small read-only git subset. This avoids using the broader approval-gated `git_run` tool for common repository inspection requests.
 
 Supported subcommands:
 
@@ -233,6 +253,7 @@ Safety characteristics:
 - only a fixed read-only subcommand set is allowed
 - inline git config overrides are rejected
 - broader git mutations still require approval through `git_run`
+- non-git filesystem inspection should use `inspect_path`
 
 Example tool payloads:
 
@@ -244,7 +265,7 @@ Example tool payloads:
 
 ## Read-Only Inspection Tool
 
-The agent now exposes an approval-free `inspect_path` tool for common workspace inspection tasks that do not need arbitrary shell execution. It is limited to read-only actions and is intended to cover the most common folder-viewing requests before falling back to the approval-gated `exec` tool.
+The agent exposes an approval-free `inspect_path` tool for common workspace inspection tasks that do not need arbitrary shell execution.
 
 Supported actions:
 
@@ -260,7 +281,8 @@ Safety characteristics:
 - `pwd` returns the project-root marker directly instead of invoking a subprocess
 - argv-based subprocess execution is used for bounded `ls` / `find` / `du` actions
 - no delete, move, or network behavior
-- `write_file` and `edit_file` now execute immediately inside the project root
+- file contents should use `read_file`
+- git state should use `git_inspect`
 - `exec` remains approval-gated for anything broader
 
 Example tool payloads:
@@ -270,6 +292,38 @@ Example tool payloads:
 {"action": "ls", "path": "agent"}
 {"action": "find", "path": "agent", "max_depth": 2}
 {"action": "du", "path": "tests"}
+```
+
+## Read-Only Command Tool
+
+The agent exposes an approval-free `read_only_command` tool for a very small non-git shell-style subset that is narrower than `exec`.
+
+Supported commands:
+
+- `head`
+- `tail`
+- `wc`
+- `stat`
+- `file`
+
+Safety characteristics:
+
+- `cat` is intentionally rejected so direct file contents route to `read_file`
+- only one target path is allowed per request
+- target paths are restricted to the project root
+- `head` and `tail` only allow `-n` and enforce bounded output sizes
+- `wc` only allows `-l`, `-w`, or `-c`
+- `stat` and `file` allow no extra flags
+- arbitrary shell composition still requires approval through `exec`
+
+Example tool payloads:
+
+```json
+{"args": "head -n 20 README.md"}
+{"args": "tail -n 10 tests/test_tools.py"}
+{"args": "wc -l agent/tools/file_tools.py"}
+{"args": "stat README.md"}
+{"args": "file README.md"}
 ```
 
 ## Example Commands
@@ -300,6 +354,7 @@ This project is intentionally structured for machine readability and automation:
 ## Documentation
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
+- Exec safety convergence plan: [docs/exec-safety-convergence/plan.md](docs/exec-safety-convergence/plan.md)
 - Observability expansion plan: [docs/observability-expansion/plan.md](docs/observability-expansion/plan.md)
 - Observability expansion research: [docs/observability-expansion/research.md](docs/observability-expansion/research.md)
 - Observability rotation plan: [docs/observability-rotation/plan.md](docs/observability-rotation/plan.md)

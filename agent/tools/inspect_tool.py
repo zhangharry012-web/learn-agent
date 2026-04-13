@@ -19,9 +19,10 @@ DEFAULT_DU_MAX_ENTRIES = 200
 class InspectPathTool(BaseTool):
     name = 'inspect_path'
     description = (
-        'Inspect workspace directories with a small set of safe read-only actions. '
-        'Supports pwd, ls, find, and du style directory inspection without arbitrary shell execution '
-        'and does not require human approval.'
+        'Inspect workspace layout with a small set of safe read-only path actions. '
+        'Use this tool for pwd, ls, find, and du style directory inspection. '
+        'Do not use it for file contents because read_file is the correct tool, and do not use it for git state because git_inspect is the correct tool. '
+        'This tool does not require human approval.'
     )
     input_schema = {
         'type': 'object',

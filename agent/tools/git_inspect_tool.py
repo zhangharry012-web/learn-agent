@@ -17,8 +17,9 @@ DISALLOWED_GIT_FLAGS = {'--cached', '--staged'}
 class GitInspectTool(BaseTool):
     name = 'git_inspect'
     description = (
-        'Run a small set of read-only git inspection commands inside the current repository without '
-        'human approval. Supports only status, diff, log, and show arguments.'
+        'Run a small read-only git subset inside the current repository without human approval. '
+        'Use this tool for git status, diff, log, and show style repository inspection. '
+        'Do not use it for non-git filesystem inspection because inspect_path is the correct tool, and do not use it for file contents because read_file is the correct tool.'
     )
     input_schema = {
         'type': 'object',

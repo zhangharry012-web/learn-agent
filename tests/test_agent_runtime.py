@@ -238,7 +238,6 @@ class AgentLLMTests(unittest.TestCase):
             self.assertTrue(malformed.exists())
             self.assertTrue(recent_session_path.exists())
 
-
     def test_inspect_path_executes_without_approval(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
             root = Path(tmpdir)
@@ -268,7 +267,6 @@ class AgentLLMTests(unittest.TestCase):
             self.assertFalse(response.awaiting_confirmation)
             self.assertEqual(response.message, 'Workspace inspected.')
             self.assertEqual(shell_runner.argv_calls, [])
-
 
     def test_write_outside_project_root_is_rejected(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
@@ -303,7 +301,6 @@ class AgentLLMTests(unittest.TestCase):
             self.assertEqual(response.message, 'Write rejected.')
             self.assertFalse((root.parent / 'escape.txt').exists())
 
-
     def test_git_inspect_executes_without_approval(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
             root = Path(tmpdir)
@@ -333,3 +330,34 @@ class AgentLLMTests(unittest.TestCase):
             self.assertFalse(response.awaiting_confirmation)
             self.assertEqual(response.message, 'Repository inspected.')
             self.assertEqual(shell_runner.argv_calls[0]['argv'], ['git', 'status', '--short'])
+
+    def test_read_only_command_executes_without_approval(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            (root / 'README.md').write_text('alpha\nbeta\n', encoding='utf-8')
+            shell_runner = FakeShellRunner(ShellResult(command='wc -l README.md', returncode=0, stdout='2 README.md\n', stderr=''))
+            llm = FakeLLM(
+                [
+                    LLMResponse(
+                        text='',
+                        tool_calls=[ToolCall(id='toolu_read_only_1', name='read_only_command', arguments={'args': 'wc -l README.md'})],
+                        stop_reason='tool_use',
+                    ),
+                    LLMResponse(text='File summary inspected.', tool_calls=[], stop_reason='end_turn'),
+                ]
+            )
+            logger = ObservabilityLogger(root / 'logs' / 'observability')
+            agent = Agent(
+                llm=llm,
+                shell_runner=shell_runner,
+                config=AgentConfig(llm_api_key='test'),
+                workspace_root=root,
+                observability_logger=logger,
+            )
+
+            response = agent.handle('count lines in readme')
+
+            self.assertTrue(response.ok)
+            self.assertFalse(response.awaiting_confirmation)
+            self.assertEqual(response.message, 'File summary inspected.')
+            self.assertEqual(shell_runner.argv_calls[0]['argv'], ['wc', '-l', 'README.md'])

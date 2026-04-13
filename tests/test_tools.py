@@ -4,7 +4,17 @@ import unittest
 from pathlib import Path
 
 from agent.shell import ShellResult
-from agent.tools import EditFileTool, ExecTool, GitInspectTool, GitTool, InspectPathTool, ReadFileTool, WriteFileTool, build_tools
+from agent.tools import (
+    EditFileTool,
+    ExecTool,
+    GitInspectTool,
+    GitTool,
+    InspectPathTool,
+    ReadFileTool,
+    ReadOnlyCommandTool,
+    WriteFileTool,
+    build_tools,
+)
 from tests.helpers import FakeShellRunner
 
 
@@ -114,7 +124,16 @@ class ToolTests(unittest.TestCase):
 
             self.assertEqual(
                 set(tools),
-                {'read_file', 'write_file', 'edit_file', 'git_run', 'git_inspect', 'exec', 'inspect_path'},
+                {
+                    'read_file',
+                    'write_file',
+                    'edit_file',
+                    'git_run',
+                    'git_inspect',
+                    'exec',
+                    'inspect_path',
+                    'read_only_command',
+                },
             )
 
     def test_inspect_path_tool_uses_argv_for_ls(self):
@@ -157,7 +176,6 @@ class ToolTests(unittest.TestCase):
             self.assertFalse(result.ok)
             self.assertEqual(result.content, 'Target path does not exist.')
 
-
     def test_write_file_tool_rejects_path_escape(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -178,7 +196,6 @@ class ToolTests(unittest.TestCase):
             self.assertFalse(result.ok)
             self.assertEqual(result.content, 'Path escapes the workspace root.')
 
-
     def test_inspect_path_tool_pwd_returns_project_root_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -190,7 +207,6 @@ class ToolTests(unittest.TestCase):
             payload = json.loads(result.content)
             self.assertEqual(payload['stdout'], '.')
             self.assertEqual(payload['stderr'], '')
-
 
     def test_git_inspect_tool_allows_status(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -214,3 +230,44 @@ class ToolTests(unittest.TestCase):
 
             self.assertFalse(result.ok)
             self.assertEqual(result.content, 'Only read-only git inspect commands are allowed.')
+
+    def test_read_only_command_tool_runs_head_without_shell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / 'notes.txt'
+            target.write_text('alpha\nbeta\n', encoding='utf-8')
+            shell_runner = FakeShellRunner(
+                ShellResult(command='head -n 2 notes.txt', returncode=0, stdout='alpha\nbeta\n', stderr='')
+            )
+            tool = ReadOnlyCommandTool(root, shell_runner)
+
+            result = tool.execute({'args': 'head -n 2 notes.txt'})
+
+            self.assertTrue(result.ok)
+            self.assertEqual(shell_runner.argv_calls[0]['argv'], ['head', '-n', '2', 'notes.txt'])
+            payload = json.loads(result.content)
+            self.assertEqual(payload['stdout'], 'alpha\nbeta')
+
+    def test_read_only_command_tool_rejects_cat(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'notes.txt').write_text('alpha\n', encoding='utf-8')
+            tool = ReadOnlyCommandTool(
+                root,
+                FakeShellRunner(ShellResult(command='cat notes.txt', returncode=0, stdout='alpha\n', stderr='')),
+            )
+
+            result = tool.execute({'args': 'cat notes.txt'})
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.content, 'Use read_file for direct file contents instead of cat.')
+
+    def test_read_only_command_tool_rejects_path_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tool = ReadOnlyCommandTool(root, FakeShellRunner(ShellResult(command='stat ../escape.txt', returncode=0, stdout='', stderr='')))
+
+            result = tool.execute({'args': 'stat ../escape.txt'})
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.content, 'Path escapes the workspace root.')
