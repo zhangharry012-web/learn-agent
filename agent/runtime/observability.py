@@ -64,9 +64,7 @@ class ObservabilityLogger:
     def _event_paths(self, session_id: str, now: datetime) -> Tuple[Path, Path]:
         date_part = now.strftime('%Y-%m-%d')
         hour_part = now.strftime('%H') + '.jsonl'
-        events_path = self.events_dir / date_part / hour_part
-        session_path = self.sessions_dir / session_id / date_part / hour_part
-        return events_path, session_path
+        return self.events_dir / date_part / hour_part, self.sessions_dir / session_id / date_part / hour_part
 
     def _ensure_dirs(self) -> None:
         try:
@@ -104,9 +102,7 @@ class ObservabilityLogger:
 
     def _should_delete_path(self, path: Path, cutoff: datetime) -> bool:
         partition_time = self._extract_partition_time(path)
-        if partition_time is None:
-            return False
-        return partition_time < cutoff
+        return partition_time is not None and partition_time < cutoff
 
     def _extract_partition_time(self, path: Path) -> Optional[datetime]:
         try:
@@ -122,9 +118,8 @@ class ObservabilityLogger:
             return None
         if not hour_part.endswith('.jsonl'):
             return None
-        hour_value = hour_part[:-6]
         try:
-            return datetime.strptime(f'{date_part} {hour_value}', '%Y-%m-%d %H').replace(tzinfo=timezone.utc)
+            return datetime.strptime(f'{date_part} {hour_part[:-6]}', '%Y-%m-%d %H').replace(tzinfo=timezone.utc)
         except ValueError:
             return None
 

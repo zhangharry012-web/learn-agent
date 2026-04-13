@@ -219,3 +219,18 @@ class AgentLLMTests(unittest.TestCase):
             self.assertFalse(stale_session_dir.exists())
             current_paths = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))
             self.assertTrue(current_paths)
+
+    def test_cleanup_skips_malformed_paths_and_keeps_recent_logs(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            logger = ObservabilityLogger(root / 'logs' / 'observability', retention_hours=1)
+            malformed = root / 'logs' / 'observability' / 'events' / 'bad-date' / 'nope.jsonl'
+            recent_moment = datetime.now(timezone.utc)
+            _, recent_session_path = _utc_partition_paths(root, 'active-session', recent_moment)
+            malformed.parent.mkdir(parents=True, exist_ok=True)
+            recent_session_path.parent.mkdir(parents=True, exist_ok=True)
+            malformed.write_text('{"bad": true}\n', encoding='utf-8')
+            recent_session_path.write_text('{"recent": true}\n', encoding='utf-8')
+            logger.log_event('command_received', 'active-session', {'command': 'hello'})
+            self.assertTrue(malformed.exists())
+            self.assertTrue(recent_session_path.exists())

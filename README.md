@@ -218,8 +218,10 @@ This project is intentionally structured for machine readability and automation:
 ## Documentation
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
-- Observability plan: [docs/observability-expansion/plan.md](docs/observability-expansion/plan.md)
-- Observability research: [docs/observability-expansion/research.md](docs/observability-expansion/research.md)
+- Observability expansion plan: [docs/observability-expansion/plan.md](docs/observability-expansion/plan.md)
+- Observability expansion research: [docs/observability-expansion/research.md](docs/observability-expansion/research.md)
+- Observability rotation plan: [docs/observability-rotation/plan.md](docs/observability-rotation/plan.md)
+- Observability rotation research: [docs/observability-rotation/research.md](docs/observability-rotation/research.md)
 - Multi-provider design notes: [docs/multi-llm-provider/plan.md](docs/multi-llm-provider/plan.md)
 - Multi-provider research notes: [docs/multi-llm-provider/research.md](docs/multi-llm-provider/research.md)
 
@@ -228,6 +230,9 @@ This project is intentionally structured for machine readability and automation:
 - Add command routing and intent parsing
 - Add memory and conversation persistence
 - Expand pluggable tool registry
+- Add confirmation hooks on top of the current safety denylist
+- Expand automated test coverage
+- Add lightweight log summary and browsing utilities for observability output
 - Add confirmation hooks on top of the current safety denylist
 - Expand automated test coverage
 - Add lightweight log summary and browsing utilities for observability output
