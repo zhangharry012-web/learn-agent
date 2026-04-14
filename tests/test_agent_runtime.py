@@ -14,6 +14,7 @@ from agent.runtime.events import (
     COMMAND_RECEIVED,
     LLM_PANIC,
     LLM_RESPONSE_COMPLETED,
+    SESSION_SUMMARY,
     SHELL_EXECUTION_COMPLETED,
     TOOL_APPROVAL_COMPLETED,
     TOOL_EXECUTION_COMPLETED,
@@ -111,6 +112,84 @@ class AgentLLMTests(unittest.TestCase):
             llm_event = next(event for event in filtered_global_events if event['event_type'] == LLM_RESPONSE_COMPLETED)
             self.assertEqual(llm_event['payload']['usage']['total_tokens'], 15)
             self.assertRegex(llm_event['timestamp'], r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$')
+
+    def test_session_summary_is_logged_on_exit_with_llm_and_tool_totals(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            shell_runner = FakeShellRunner(
+                ShellResult(command='python -m unittest tests.test_tools', returncode=0, stdout='ok', stderr='')
+            )
+            llm = FakeLLM(
+                [
+                    LLMResponse(
+                        text='',
+                        tool_calls=[
+                            ToolCall(
+                                id='toolu_write_1',
+                                name='write_file',
+                                arguments={'path': 'draft.txt', 'content': 'generated', 'mode': 'overwrite'},
+                            )
+                        ],
+                        stop_reason='tool_use',
+                        usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+                    ),
+                    LLMResponse(
+                        text='File written.',
+                        tool_calls=[],
+                        stop_reason='end_turn',
+                        usage=TokenUsage(input_tokens=8, output_tokens=4, total_tokens=12),
+                    ),
+                    LLMResponse(
+                        text='',
+                        tool_calls=[
+                            ToolCall(
+                                id='toolu_verify_1',
+                                name='verify_command',
+                                arguments={'argv': ['python', '-m', 'unittest', 'tests.test_tools']},
+                            )
+                        ],
+                        stop_reason='tool_use',
+                        usage=TokenUsage(input_tokens=12, output_tokens=6, total_tokens=18),
+                    ),
+                    LLMResponse(
+                        text='Verification completed.',
+                        tool_calls=[],
+                        stop_reason='end_turn',
+                        usage=TokenUsage(input_tokens=7, output_tokens=3, total_tokens=10),
+                    ),
+                ]
+            )
+            logger = ObservabilityLogger(root / 'logs' / 'observability')
+            agent = Agent(
+                llm=llm,
+                shell_runner=shell_runner,
+                config=AgentConfig(llm_api_key='test'),
+                workspace_root=root,
+                observability_logger=logger,
+            )
+
+            first = agent.handle('create a draft file')
+            second = agent.handle('run python verification')
+            exit_response = agent.handle('exit')
+
+            self.assertTrue(first.ok)
+            self.assertTrue(second.ok)
+            self.assertTrue(exit_response.ok)
+            self.assertTrue(exit_response.should_exit)
+
+            events_path = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))[0]
+            events = _read_events(events_path)
+            summary_event = next(event for event in events if event['event_type'] == SESSION_SUMMARY)
+            payload = summary_event['payload']
+            self.assertEqual(payload['trigger'], 'session_exit')
+            self.assertEqual(payload['command'], 'exit')
+            self.assertEqual(payload['command_count'], 3)
+            self.assertEqual(payload['llm_call_count'], 4)
+            self.assertEqual(payload['tool_call_count'], 2)
+            self.assertEqual(payload['tool_call_breakdown'], {'verify_command': 1, 'write_file': 1})
+            self.assertEqual(payload['token_usage']['input_tokens'], 37)
+            self.assertEqual(payload['token_usage']['output_tokens'], 18)
+            self.assertEqual(payload['token_usage']['total_tokens'], 55)
 
     def test_edit_executes_without_approval(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:

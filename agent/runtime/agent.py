@@ -16,6 +16,7 @@ from agent.runtime.events import (
     LLM_LOOP_LIMIT_EXCEEDED,
     LLM_PANIC,
     LLM_RESPONSE_COMPLETED,
+    SESSION_SUMMARY,
     SHELL_EXECUTION_COMPLETED,
     TOOL_APPROVAL_COMPLETED,
     TOOL_APPROVAL_REQUESTED,
@@ -66,6 +67,19 @@ class Agent:
             retention_hours=self.config.observability_retention_hours,
         )
         self.exception_log_dir = self.workspace_root / self.config.exception_log_dir
+        self._session_totals: Dict[str, Any] = {
+            'token_usage': {
+                'input_tokens': 0,
+                'output_tokens': 0,
+                'total_tokens': 0,
+            },
+            'llm_call_count': 0,
+            'tool_call_count': 0,
+            'tool_call_breakdown': {},
+            'shell_command_count': 0,
+            'command_count': 0,
+            'summary_emitted': False,
+        }
 
     def _build_default_llm(self, max_tokens: Optional[int] = None) -> Optional[BaseLLMClient]:
         if not self.config.llm_enabled:
@@ -90,6 +104,7 @@ class Agent:
         started_at = time.perf_counter()
         normalized = command.strip()
         mode = 'input'
+        self._session_totals['command_count'] += 1
         self.observability.log_event(
             COMMAND_RECEIVED,
             self.session_id,
@@ -142,6 +157,8 @@ class Agent:
                 'stderr': response.stderr,
             },
         )
+        if response.should_exit:
+            self._log_session_summary(command=normalized, trigger='session_exit')
         return response
 
     def _handle_shell_turn(self, command: str) -> AgentResponse:
@@ -164,6 +181,7 @@ class Agent:
                 returncode=126,
             )
         result = self.shell_runner.run(command)
+        self._session_totals['shell_command_count'] += 1
         self.observability.log_event(
             SHELL_EXECUTION_COMPLETED,
             self.session_id,
@@ -209,6 +227,7 @@ class Agent:
             if approved
             else ToolExecutionResult(ok=False, content='User denied tool execution.')
         )
+        self._record_tool_call(pending.tool_name)
         self.observability.log_event(
             TOOL_EXECUTION_COMPLETED,
             self.session_id,
@@ -258,6 +277,7 @@ class Agent:
                 return self._handle_llm_panic(exc, original_command, step + 1, working_messages)
             except Exception as exc:
                 return self._handle_llm_panic(exc, original_command, step + 1, working_messages)
+            self._record_llm_usage(response.usage)
             self.observability.log_event(
                 LLM_RESPONSE_COMPLETED,
                 self.session_id,
@@ -319,6 +339,7 @@ class Agent:
                         )
                     tool_started_at = time.perf_counter()
                     result = tool.execute(tool_input)
+                    self._record_tool_call(tool_call.name)
                     self.observability.log_event(
                         TOOL_EXECUTION_COMPLETED,
                         self.session_id,
@@ -361,7 +382,7 @@ class Agent:
         return AgentResponse(
             ok=False,
             command=original_command,
-            stderr='LLM tool loop exceeded the maximum number of steps.',
+            stderr='LLM exceeded the maximum tool interaction limit.',
             returncode=1,
         )
 
@@ -372,15 +393,12 @@ class Agent:
         step: int,
         messages: List[Dict[str, Any]],
     ) -> AgentResponse:
-        exception_path = self.observability.log_exception(
+        log_path = self.observability.log_exception(
             self.session_id,
             error,
             {
                 'command': original_command,
                 'step': step,
-                'provider': self.config.llm_provider,
-                'model': self.config.llm_model,
-                'max_tokens': self.current_llm_max_tokens,
                 'message_count': len(messages),
             },
             self.exception_log_dir,
@@ -393,8 +411,7 @@ class Agent:
                 'step': step,
                 'error_type': error.__class__.__name__,
                 'error_message': str(error),
-                'max_tokens': self.current_llm_max_tokens,
-                'exception_log_path': str(exception_path) if exception_path is not None else '',
+                'exception_log_path': None if log_path is None else str(log_path),
             },
         )
         return AgentResponse(
@@ -402,4 +419,37 @@ class Agent:
             command=original_command,
             stderr=LLM_PANIC_RETRY_MESSAGE,
             returncode=1,
+        )
+
+    def _record_llm_usage(self, usage: Any) -> None:
+        self._session_totals['llm_call_count'] += 1
+        if usage is None:
+            return
+        tokens = self._session_totals['token_usage']
+        tokens['input_tokens'] += getattr(usage, 'input_tokens', 0) or 0
+        tokens['output_tokens'] += getattr(usage, 'output_tokens', 0) or 0
+        tokens['total_tokens'] += getattr(usage, 'total_tokens', 0) or 0
+
+    def _record_tool_call(self, tool_name: str) -> None:
+        self._session_totals['tool_call_count'] += 1
+        breakdown = self._session_totals['tool_call_breakdown']
+        breakdown[tool_name] = breakdown.get(tool_name, 0) + 1
+
+    def _log_session_summary(self, *, command: str, trigger: str) -> None:
+        if self._session_totals['summary_emitted']:
+            return
+        self._session_totals['summary_emitted'] = True
+        self.observability.log_event(
+            SESSION_SUMMARY,
+            self.session_id,
+            {
+                'trigger': trigger,
+                'command': command,
+                'command_count': self._session_totals['command_count'],
+                'llm_call_count': self._session_totals['llm_call_count'],
+                'tool_call_count': self._session_totals['tool_call_count'],
+                'tool_call_breakdown': dict(sorted(self._session_totals['tool_call_breakdown'].items())),
+                'shell_command_count': self._session_totals['shell_command_count'],
+                'token_usage': dict(self._session_totals['token_usage']),
+            },
         )
