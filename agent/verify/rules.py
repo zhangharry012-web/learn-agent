@@ -12,7 +12,7 @@ from agent.shell import ShellResult
 SHELL_META_PATTERN = re.compile(r'(\|\||&&|[;<>`]|\$\()')
 SUPPORTED_LANGUAGES = frozenset({'go', 'python', 'ts'})
 ALLOWED_NODE_SCRIPT_NAMES = frozenset({'test', 'lint', 'build', 'typecheck', 'check'})
-ALLOWED_TS_EXECUTABLES = frozenset({'npm', 'pnpm', 'yarn'})
+ALLOWED_TS_EXECUTABLES = frozenset({'npm', 'pnpm', 'yarn', 'npx'})
 ALLOWED_PYTHON_EXECUTABLES = frozenset({'python', 'python3', 'pytest', 'ruff', 'mypy'})
 
 
@@ -100,7 +100,7 @@ class VerifyPolicySet:
 def default_policy() -> VerifyPolicySet:
     return VerifyPolicySet(
         default_timeout_sec=120,
-        deny_keywords=['install', 'publish', 'deploy', 'curl', 'wget', 'bash', 'sh', 'npx'],
+        deny_keywords=['install', 'publish', 'deploy', 'curl', 'wget', 'bash', 'sh'],
         allow_rules=[
             VerifyRule(
                 rule_id='python-unittest',
@@ -151,6 +151,16 @@ def default_policy() -> VerifyPolicySet:
             VerifyRule(rule_id='yarn-lint', argv_exact=['yarn', 'lint'], max_timeout_sec=60),
             VerifyRule(rule_id='yarn-build', argv_exact=['yarn', 'build'], max_timeout_sec=180),
             VerifyRule(rule_id='yarn-typecheck', argv_exact=['yarn', 'typecheck'], max_timeout_sec=120),
+            VerifyRule(
+                rule_id='npx-ts-node',
+                argv_prefix=['npx', 'ts-node'],
+                allowed_arg_regex=[r'^[A-Za-z0-9_./-]+\.ts$'],
+            ),
+            VerifyRule(
+                rule_id='npx-tsx',
+                argv_prefix=['npx', 'tsx'],
+                allowed_arg_regex=[r'^[A-Za-z0-9_./-]+\.ts$', r'^[A-Za-z0-9_./-]+\.tsx$'],
+            ),
         ],
     )
 
@@ -238,6 +248,10 @@ def validate_language_command(argv: List[str]) -> None:
         if executable in {'pnpm', 'yarn'}:
             if argv[1:] not in [['test'], ['lint'], ['build'], ['typecheck']]:
                 raise VerifyCommandRejected('Only pnpm/yarn test/lint/build/typecheck are allowed.')
+            return
+        if executable == 'npx':
+            if len(argv) < 2 or argv[1] not in {'ts-node', 'tsx'}:
+                raise VerifyCommandRejected('Only npx ts-node and npx tsx are allowed for npx verification commands.')
             return
 
 

@@ -57,36 +57,47 @@ class ReadFileTool(BaseTool):
 class WriteFileTool(BaseTool):
     name = 'write_file'
     description = (
-        'Write text to a local file in the current workspace. Use this tool only when the user '
-        'explicitly wants file content created or modified. This tool executes immediately '
-        'inside the project root and never writes outside that root. The mode can be overwrite or append.'
+        'Write text to a local file in the current workspace, or delete a file. Use this tool only when the user '
+        'explicitly wants file content created, modified, or removed. This tool executes immediately '
+        'inside the project root and never writes outside that root. The mode can be overwrite, append, or delete. '
+        'Use mode=delete to remove temporary or generated files without needing exec approval.'
     )
     input_schema = {
         'type': 'object',
         'properties': {
             'path': {
                 'type': 'string',
-                'description': 'Relative path to the file to write.',
+                'description': 'Relative path to the file to write or delete.',
             },
             'content': {
                 'type': 'string',
-                'description': 'Full text content to write.',
+                'description': 'Full text content to write. Not required when mode is delete.',
             },
             'mode': {
                 'type': 'string',
-                'enum': ['overwrite', 'append'],
-                'description': 'Whether to replace the file or append to it.',
+                'enum': ['overwrite', 'append', 'delete'],
+                'description': 'Whether to replace the file, append to it, or delete it.',
             },
         },
-        'required': ['path', 'content', 'mode'],
+        'required': ['path', 'mode'],
     }
 
     def execute(self, payload: Mapping[str, Any]) -> ToolExecutionResult:
         try:
             path = self.resolve_path(str(payload['path']))
-            path.parent.mkdir(parents=True, exist_ok=True)
             mode = str(payload['mode'])
-            content = str(payload['content'])
+            if mode == 'delete':
+                if not path.exists():
+                    return ToolExecutionResult(ok=False, content='Target file does not exist.')
+                path.unlink()
+                result = {
+                    'path': str(path.relative_to(self.workspace_root)),
+                    'mode': 'delete',
+                    'deleted': True,
+                }
+                return ToolExecutionResult(ok=True, content=json.dumps(result, ensure_ascii=False))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            content = str(payload.get('content') or '')
             if mode == 'overwrite':
                 path.write_text(content, encoding='utf-8')
             elif mode == 'append':
@@ -105,9 +116,12 @@ class WriteFileTool(BaseTool):
             return ToolExecutionResult(ok=False, content=str(exc))
 
     def approval_prompt(self, payload: Mapping[str, Any]) -> str:
+        mode = payload.get('mode')
+        if mode == 'delete':
+            return f"Approve file delete? path={payload.get('path')}"
         return (
             'Approve file write? '
-            f"path={payload.get('path')} mode={payload.get('mode')} "
+            f"path={payload.get('path')} mode={mode} "
             f"bytes={len(str(payload.get('content', '')).encode('utf-8'))}"
         )
 

@@ -90,3 +90,32 @@ class VerifyPolicyTests(unittest.TestCase):
             relative_cwd = relative_path(root, cwd)
             rule = select_rule(['python', '-m', 'unittest', 'tests.test_tools'], relative_cwd, [], root, AgentConfig())
             self.assertEqual(rule.rule_id, 'python-unittest')
+
+    def test_classify_language_supports_npx(self):
+        self.assertEqual(classify_language(['npx', 'ts-node', 'test.ts']), 'ts')
+        self.assertEqual(classify_language(['npx', 'tsx', 'test.ts']), 'ts')
+
+    def test_validate_language_command_accepts_npx_ts_node(self):
+        validate_language_command(['npx', 'ts-node', 'test.ts'])
+        validate_language_command(['npx', 'tsx', 'test.ts'])
+
+    def test_validate_language_command_rejects_npx_arbitrary(self):
+        from agent.verify import VerifyCommandRejected
+        with self.assertRaises(VerifyCommandRejected):
+            validate_language_command(['npx', 'cowsay', 'hello'])
+
+    def test_default_policy_matches_npx_ts_node(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cwd = resolve_cwd(root, '.')
+            relative_cwd = relative_path(root, cwd)
+            rule = select_rule(['npx', 'ts-node', 'test.ts'], relative_cwd, [], root, AgentConfig())
+            self.assertEqual(rule.rule_id, 'npx-ts-node')
+
+    def test_default_policy_matches_npx_tsx(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cwd = resolve_cwd(root, '.')
+            relative_cwd = relative_path(root, cwd)
+            rule = select_rule(['npx', 'tsx', 'app.ts'], relative_cwd, [], root, AgentConfig())
+            self.assertEqual(rule.rule_id, 'npx-tsx')
