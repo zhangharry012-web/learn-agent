@@ -390,6 +390,45 @@ class AgentLLMTests(unittest.TestCase):
             self.assertEqual(response.message, 'File summary inspected.')
             self.assertEqual(shell_runner.argv_calls[0]['argv'], ['wc', '-l', 'README.md'])
 
+    def test_verify_command_executes_without_approval(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            shell_runner = FakeShellRunner(
+                ShellResult(command='python -m unittest tests.test_tools', returncode=0, stdout='ok', stderr='')
+            )
+            llm = FakeLLM(
+                [
+                    LLMResponse(
+                        text='',
+                        tool_calls=[
+                            ToolCall(
+                                id='toolu_verify_1',
+                                name='verify_command',
+                                arguments={'argv': ['python', '-m', 'unittest', 'tests.test_tools']},
+                            )
+                        ],
+                        stop_reason='tool_use',
+                    ),
+                    LLMResponse(text='Verification completed.', tool_calls=[], stop_reason='end_turn'),
+                ]
+            )
+            logger = ObservabilityLogger(root / 'logs' / 'observability')
+            agent = Agent(
+                llm=llm,
+                shell_runner=shell_runner,
+                config=AgentConfig(llm_api_key='test'),
+                workspace_root=root,
+                observability_logger=logger,
+            )
+
+            response = agent.handle('run python verification')
+
+            self.assertTrue(response.ok)
+            self.assertFalse(response.awaiting_confirmation)
+            self.assertEqual(response.message, 'Verification completed.')
+            self.assertEqual(shell_runner.argv_calls[0]['argv'], ['python', '-m', 'unittest', 'tests.test_tools'])
+            self.assertEqual(shell_runner.argv_calls[0]['timeout'], 120)
+
     def test_llm_tool_call_format_error_retries_with_fallback_max_tokens(self):
         RetryFormatErrorLLM.has_failed_once = False
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:

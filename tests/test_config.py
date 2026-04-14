@@ -6,6 +6,7 @@ from pathlib import Path
 from agent.config import (
     AgentConfig,
     DEFAULT_LLM_MAX_TOKENS,
+    DEFAULT_VERIFY_TIMEOUT_SEC,
     FALLBACK_LLM_MAX_TOKENS,
     _load_env_file,
 )
@@ -40,6 +41,10 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.llm_max_tokens, DEFAULT_LLM_MAX_TOKENS)
             self.assertEqual(config.llm_fallback_max_tokens, FALLBACK_LLM_MAX_TOKENS)
             self.assertEqual(config.exception_log_dir, 'logs/exceptions')
+            self.assertTrue(config.verify_auto_approve_enabled)
+            self.assertEqual(config.verify_policy_file, '.agent/verify-policy.json')
+            self.assertEqual(config.verify_default_timeout_sec, DEFAULT_VERIFY_TIMEOUT_SEC)
+            self.assertFalse(config.verify_require_repo_policy)
             self.assertTrue(config.observability_enabled)
             self.assertEqual(config.observability_log_dir, 'logs/observability')
             self.assertEqual(config.observability_preview_chars, 2000)
@@ -88,6 +93,10 @@ class ConfigTests(unittest.TestCase):
                 'LLM_MAX_TOKENS=9000\n'
                 'LLM_FALLBACK_MAX_TOKENS=18000\n'
                 'EXCEPTION_LOG_DIR=panic-logs\n'
+                'VERIFY_AUTO_APPROVE_ENABLED=false\n'
+                'VERIFY_POLICY_FILE=.verify/custom.json\n'
+                'VERIFY_DEFAULT_TIMEOUT_SEC=222\n'
+                'VERIFY_REQUIRE_REPO_POLICY=true\n'
                 'OBSERVABILITY_ENABLED=false\n'
                 'OBSERVABILITY_LOG_DIR=custom-logs\n'
                 'OBSERVABILITY_PREVIEW_CHARS=128\n'
@@ -104,6 +113,10 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.llm_max_tokens, 9000)
             self.assertEqual(config.llm_fallback_max_tokens, 18000)
             self.assertEqual(config.exception_log_dir, 'panic-logs')
+            self.assertFalse(config.verify_auto_approve_enabled)
+            self.assertEqual(config.verify_policy_file, '.verify/custom.json')
+            self.assertEqual(config.verify_default_timeout_sec, 222)
+            self.assertTrue(config.verify_require_repo_policy)
             self.assertFalse(config.observability_enabled)
             self.assertEqual(config.observability_log_dir, 'custom-logs')
             self.assertEqual(config.observability_preview_chars, 128)

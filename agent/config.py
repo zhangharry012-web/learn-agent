@@ -8,6 +8,7 @@ DEFAULT_PROVIDER = 'anthropic'
 DEFAULT_MODEL = 'claude-sonnet-4-20250514'
 DEFAULT_LLM_MAX_TOKENS = 8 * 1024
 FALLBACK_LLM_MAX_TOKENS = 16 * 1024
+DEFAULT_VERIFY_TIMEOUT_SEC = 120
 ENV_FILE_NAME = '.env'
 SUPPORTED_OPENAI_COMPATIBLE_PROVIDERS: FrozenSet[str] = frozenset(
     {'openai', 'deepseek', 'openai-compatible'}
@@ -79,6 +80,7 @@ class AgentConfig:
         'exec',
         'inspect_path',
         'read_only_command',
+        'verify_command',
     )
     observability_enabled: bool = field(default_factory=lambda: _get_env_bool('OBSERVABILITY_ENABLED', True))
     observability_log_dir: str = field(
@@ -92,6 +94,18 @@ class AgentConfig:
     )
     exception_log_dir: str = field(
         default_factory=lambda: _get_env_value('EXCEPTION_LOG_DIR', 'logs/exceptions')
+    )
+    verify_auto_approve_enabled: bool = field(
+        default_factory=lambda: _get_env_bool('VERIFY_AUTO_APPROVE_ENABLED', True)
+    )
+    verify_policy_file: str = field(
+        default_factory=lambda: _get_env_value('VERIFY_POLICY_FILE', '.agent/verify-policy.json')
+    )
+    verify_default_timeout_sec: int = field(
+        default_factory=lambda: _get_env_int('VERIFY_DEFAULT_TIMEOUT_SEC', DEFAULT_VERIFY_TIMEOUT_SEC)
+    )
+    verify_require_repo_policy: bool = field(
+        default_factory=lambda: _get_env_bool('VERIFY_REQUIRE_REPO_POLICY', False)
     )
 
     @property

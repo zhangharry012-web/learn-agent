@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from agent.config import AgentConfig
 from agent.shell import ShellResult
 from agent.tools import (
     EditFileTool,
@@ -12,6 +13,7 @@ from agent.tools import (
     InspectPathTool,
     ReadFileTool,
     ReadOnlyCommandTool,
+    VerifyCommandTool,
     WriteFileTool,
     build_tools,
 )
@@ -96,7 +98,7 @@ class ToolTests(unittest.TestCase):
             result = tool.execute({'command': 'pwd'})
 
             self.assertTrue(result.ok)
-            self.assertEqual(shell_runner.command_calls, [{'command': 'pwd', 'cwd': root}])
+            self.assertEqual(shell_runner.command_calls, [{'command': 'pwd', 'cwd': root, 'timeout': None}])
             payload = json.loads(result.content)
             self.assertEqual(payload['stdout'], 'ok')
 
@@ -120,7 +122,7 @@ class ToolTests(unittest.TestCase):
                 ShellResult(command='echo ok', returncode=0, stdout='ok', stderr='')
             )
 
-            tools = build_tools(workspace_root=root, shell_runner=shell_runner)
+            tools = build_tools(workspace_root=root, shell_runner=shell_runner, config=AgentConfig())
 
             self.assertEqual(
                 set(tools),
@@ -133,6 +135,7 @@ class ToolTests(unittest.TestCase):
                     'exec',
                     'inspect_path',
                     'read_only_command',
+                    'verify_command',
                 },
             )
 
@@ -271,3 +274,93 @@ class ToolTests(unittest.TestCase):
 
             self.assertFalse(result.ok)
             self.assertEqual(result.content, 'Path escapes the workspace root.')
+
+    def test_verify_command_tool_runs_python_unittest_without_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shell_runner = FakeShellRunner(
+                ShellResult(command='python -m unittest tests.test_tools', returncode=0, stdout='ok', stderr='')
+            )
+            tool = VerifyCommandTool(root, shell_runner, AgentConfig())
+
+            result = tool.execute({'argv': ['python', '-m', 'unittest', 'tests.test_tools']})
+
+            self.assertTrue(result.ok)
+            self.assertEqual(shell_runner.argv_calls[0]['argv'], ['python', '-m', 'unittest', 'tests.test_tools'])
+            self.assertEqual(shell_runner.argv_calls[0]['timeout'], 120)
+            payload = json.loads(result.content)
+            self.assertEqual(payload['rule_id'], 'python-unittest')
+
+    def test_verify_command_tool_rejects_shell_tokens(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tool = VerifyCommandTool(root, FakeShellRunner(ShellResult(command='', returncode=0, stdout='', stderr='')), AgentConfig())
+
+            result = tool.execute({'argv': ['python', '-m', 'unittest', 'tests.test_tools;rm']})
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.content, 'Shell composition tokens are not allowed in verify_command.')
+
+    def test_verify_command_tool_rejects_unsupported_python_script_execution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tool = VerifyCommandTool(root, FakeShellRunner(ShellResult(command='', returncode=0, stdout='', stderr='')), AgentConfig())
+
+            result = tool.execute({'argv': ['python', 'script.py']})
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.content, 'Only python -m unittest and python -m pytest are allowed.')
+
+    def test_verify_command_tool_uses_repo_policy_when_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            policy_dir = root / '.agent'
+            policy_dir.mkdir()
+            (policy_dir / 'verify-policy.json').write_text(
+                json.dumps(
+                    {
+                        'version': 1,
+                        'allow': [
+                            {
+                                'id': 'repo-npm-lint',
+                                'argv_exact': ['npm', 'run', 'lint'],
+                                'cwd': '.',
+                                'max_timeout_sec': 33,
+                            }
+                        ],
+                        'deny_keywords': ['publish'],
+                    }
+                ),
+                encoding='utf-8',
+            )
+            shell_runner = FakeShellRunner(
+                ShellResult(command='npm run lint', returncode=0, stdout='lint ok', stderr='')
+            )
+            tool = VerifyCommandTool(root, shell_runner, AgentConfig())
+
+            result = tool.execute({'argv': ['npm', 'run', 'lint']})
+
+            self.assertTrue(result.ok)
+            self.assertEqual(shell_runner.argv_calls[0]['timeout'], 33)
+            payload = json.loads(result.content)
+            self.assertEqual(payload['rule_id'], 'repo-npm-lint')
+
+    def test_verify_command_tool_rejects_when_repo_policy_requires_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            policy_dir = root / '.agent'
+            policy_dir.mkdir()
+            (policy_dir / 'verify-policy.json').write_text(
+                json.dumps({'version': 1, 'allow': [], 'deny_keywords': []}),
+                encoding='utf-8',
+            )
+            tool = VerifyCommandTool(
+                root,
+                FakeShellRunner(ShellResult(command='', returncode=0, stdout='', stderr='')),
+                AgentConfig(),
+            )
+
+            result = tool.execute({'argv': ['go', 'test', './...']})
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.content, 'Verify command is not allowed by the repository policy.')

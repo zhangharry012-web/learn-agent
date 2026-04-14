@@ -25,10 +25,10 @@ class FakeShellRunner(ShellRunner):
         self.command_calls = []
         self.argv_calls = []
 
-    def run(self, command, cwd=None):
-        self.command_calls.append({'command': command, 'cwd': cwd})
+    def run(self, command, cwd=None, timeout=None):
+        self.command_calls.append({'command': command, 'cwd': cwd, 'timeout': timeout})
         return self.shell_result
 
-    def run_argv(self, argv, cwd=None):
-        self.argv_calls.append({'argv': list(argv), 'cwd': cwd})
+    def run_argv(self, argv, cwd=None, timeout=None):
+        self.argv_calls.append({'argv': list(argv), 'cwd': cwd, 'timeout': timeout})
         return self.shell_result

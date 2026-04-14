@@ -12,6 +12,7 @@ When `.env` contains valid LLM credentials, the agent routes user requests throu
 - `inspect_path`: inspect workspace layout with bounded `pwd` / `ls` / `find` / `du` actions without approval
 - `read_only_command`: run a narrow approval-free read-only command subset for `head` / `tail` / `wc` / `stat` / `file`
 - `git_inspect`: inspect repository state with a narrow read-only git subset without approval
+- `verify_command`: run safe verification commands such as go/python/ts test, lint, and build flows without approval when they match the verification policy
 - `git_run`: execute broader git commands after explicit human approval
 - `exec`: execute arbitrary shell commands after explicit human approval
 
@@ -68,7 +69,11 @@ learn-agent/
 │   │   ├── inspect_tool.py
 │   │   ├── read_only_command_tool.py
 │   │   ├── registry.py
-│   │   └── types.py
+│   │   ├── types.py
+│   │   └── verify_command_tool.py
+│   ├── verify/
+│   │   ├── __init__.py
+│   │   └── rules.py
 │   └── llm/
 │       ├── __init__.py
 │       ├── anthropic_client.py
@@ -216,6 +221,17 @@ OBSERVABILITY_LOG_DIR=logs/observability
 OBSERVABILITY_PREVIEW_CHARS=2000
 OBSERVABILITY_RETENTION_HOURS=720
 ```
+
+Verification configuration:
+
+```text
+VERIFY_AUTO_APPROVE_ENABLED=true
+VERIFY_POLICY_FILE=.agent/verify-policy.json
+VERIFY_DEFAULT_TIMEOUT_SEC=120
+VERIFY_REQUIRE_REPO_POLICY=false
+```
+
+A repository can define its own verification policy in `.agent/verify-policy.json`. The initial safe verification subset supports common Go, Python, and TypeScript test/lint/build flows. When a command falls outside the safe subset or does not match the repository policy, the agent must use `exec` instead.
 
 Useful inspection commands:
 
