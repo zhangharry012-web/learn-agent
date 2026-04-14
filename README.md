@@ -179,10 +179,11 @@ logs/observability/sessions/<session_id>/YYYY-MM-DD/HH.jsonl
 The JSONL stream includes clearer stage-oriented events for:
 
 - `command.received`, `command.completed`, and `command.blocked`
-- `llm.response.completed` and `llm.loop_limit.exceeded`
+- `llm.response.completed`, `llm.loop_limit.exceeded`, and `llm.panic`
 - `tool.approval.requested` and `tool.approval.completed`
 - `tool.execution.completed`
 - `shell.execution.completed`
+- `session.summary`
 
 Lifecycle reference:
 
@@ -201,6 +202,9 @@ user input
         -> tool.execution.completed
         -> llm.loop_limit.exceeded (only when the loop cap is hit)
         -> command.completed
+  -> exit / quit
+     -> command.completed
+     -> session.summary
 ```
 
 `command.received` is the entry event for a single user turn. It is emitted immediately after the input is normalized and before the agent branches into built-in handling, shell fallback, approval handling, or the LLM loop. `command.completed` closes that same user turn, while the LLM/tool/shell events describe intermediate stages inside the turn.
@@ -212,6 +216,18 @@ Turn boundaries vs. inner stages:
 - `command.received` and `command.completed` describe the outer lifecycle of one user turn.
 - `llm.response.completed`, `tool.*`, `shell.execution.completed`, and `command.blocked` describe intermediate stages inside that turn.
 - One user turn can contain multiple `llm.response.completed` or `tool.execution.completed` events, but it still starts with `command.received` and ends with `command.completed`.
+- `session.summary` is emitted once per session when the user closes the session with `exit` or `quit`.
+
+`session.summary` currently includes:
+
+- `command_count`
+- `llm_call_count`
+- `tool_call_count`
+- `tool_call_breakdown`
+- `shell_command_count`
+- `token_usage.input_tokens`
+- `token_usage.output_tokens`
+- `token_usage.total_tokens`
 
 Useful configuration:
 
