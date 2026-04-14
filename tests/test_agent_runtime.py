@@ -36,7 +36,7 @@ def _utc_partition_paths(root: Path, session_id: str, moment: datetime) -> Tuple
     date_part = moment.strftime('%Y-%m-%d')
     hour_file = moment.strftime('%H') + '.jsonl'
     events_path = root / 'logs' / 'observability' / 'events' / date_part / hour_file
-    session_path = root / 'logs' / 'observability' / 'sessions' / session_id / date_part / hour_file
+    session_path = root / 'logs' / 'observability' / 'sessions' / (session_id + '.jsonl')
     return events_path, session_path
 
 
@@ -326,16 +326,17 @@ class AgentLLMTests(unittest.TestCase):
             stale_date = stale_moment.strftime('%Y-%m-%d')
             stale_hour = stale_moment.strftime('%H') + '.jsonl'
             stale_events = root / 'logs' / 'observability' / 'events' / stale_date / stale_hour
-            stale_session_dir = root / 'logs' / 'observability' / 'sessions' / 'old-session' / stale_date
-            stale_session = stale_session_dir / stale_hour
+            stale_session = root / 'logs' / 'observability' / 'sessions' / 'old-session.jsonl'
             stale_events.parent.mkdir(parents=True, exist_ok=True)
             stale_session.parent.mkdir(parents=True, exist_ok=True)
             stale_events.write_text('{"old": true}\n', encoding='utf-8')
             stale_session.write_text('{"old": true}\n', encoding='utf-8')
+            import os
+            stale_ts = (stale_moment).timestamp()
+            os.utime(stale_session, (stale_ts, stale_ts))
             logger.log_event(COMMAND_RECEIVED, 'active-session', {'command': 'hello'})
             self.assertFalse(stale_events.exists())
             self.assertFalse(stale_session.exists())
-            self.assertFalse(stale_session_dir.exists())
             current_paths = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))
             self.assertTrue(current_paths)
 

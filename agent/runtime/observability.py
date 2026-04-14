@@ -113,7 +113,7 @@ class ObservabilityLogger:
     def _event_paths(self, session_id: str, now: datetime) -> Tuple[Path, Path]:
         date_part = now.strftime(DATE_FORMAT)
         hour_part = now.strftime(HOUR_FORMAT) + '.jsonl'
-        return self.events_dir / date_part / hour_part, self.sessions_dir / session_id / date_part / hour_part
+        return self.events_dir / date_part / hour_part, self.sessions_dir / (session_id + '.jsonl')
 
     def _ensure_dirs(self) -> None:
         try:
@@ -135,19 +135,31 @@ class ObservabilityLogger:
 
     def _cleanup_expired_logs(self, now: datetime) -> None:
         cutoff = now - timedelta(hours=self.retention_hours)
-        for root in (self.events_dir, self.sessions_dir):
-            self._delete_expired_files(root, cutoff)
-            self._prune_empty_dirs(root)
+        self._delete_expired_files(self.events_dir, cutoff, use_path_time=True)
+        self._prune_empty_dirs(self.events_dir)
+        self._delete_expired_files(self.sessions_dir, cutoff, use_path_time=False)
 
-    def _delete_expired_files(self, root: Path, cutoff: datetime) -> None:
+    def _delete_expired_files(self, root: Path, cutoff: datetime, use_path_time: bool = True) -> None:
         if not root.exists():
             return
         for path in root.rglob('*.jsonl'):
-            if self._should_delete_path(path, cutoff):
+            should_delete = False
+            if use_path_time:
+                should_delete = self._should_delete_path(path, cutoff)
+            else:
+                should_delete = self._should_delete_by_mtime(path, cutoff)
+            if should_delete:
                 try:
                     path.unlink()
                 except Exception:
                     continue
+
+    def _should_delete_by_mtime(self, path: Path, cutoff: datetime) -> bool:
+        try:
+            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            return mtime < cutoff
+        except Exception:
+            return False
 
     def _should_delete_path(self, path: Path, cutoff: datetime) -> bool:
         partition_time = self._extract_partition_time(path)
