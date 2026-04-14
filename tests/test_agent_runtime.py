@@ -14,6 +14,7 @@ from agent.runtime.events import (
     COMMAND_RECEIVED,
     LLM_PANIC,
     LLM_RESPONSE_COMPLETED,
+    LLM_LOOP_LIMIT_EXCEEDED,
     SESSION_SUMMARY,
     SHELL_EXECUTION_COMPLETED,
     VERIFY_EXECUTION_COMPLETED,
@@ -263,18 +264,18 @@ class AgentLLMTests(unittest.TestCase):
             self.assertEqual(second.message, 'Command executed.')
             self.assertEqual(shell_runner.command_calls[0]['command'], 'pwd')
 
-    def test_git_requires_approval_and_can_be_denied(self):
+    def test_exec_approval_can_be_denied(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
             root = Path(tmpdir)
-            shell_result = ShellResult(command='git status --short', returncode=0, stdout='', stderr='')
+            shell_result = ShellResult(command='rm -rf temp', returncode=0, stdout='', stderr='')
             llm = FakeLLM(
                 [
                     LLMResponse(
                         text='',
-                        tool_calls=[ToolCall(id='toolu_git_1', name='git_run', arguments={'args': 'status --short'})],
+                        tool_calls=[ToolCall(id='toolu_exec_deny_1', name='exec', arguments={'command': 'rm -rf temp'})],
                         stop_reason='tool_use',
                     ),
-                    LLMResponse(text='Git action was not executed.', tool_calls=[], stop_reason='end_turn'),
+                    LLMResponse(text='Action was not executed.', tool_calls=[], stop_reason='end_turn'),
                 ]
             )
             logger = ObservabilityLogger(root / 'logs' / 'observability')
@@ -285,12 +286,12 @@ class AgentLLMTests(unittest.TestCase):
                 workspace_root=root,
                 observability_logger=logger,
             )
-            first = agent.handle('show git status')
+            first = agent.handle('delete temp directory')
             self.assertTrue(first.awaiting_confirmation)
-            self.assertIn('Approve git command?', first.message)
+            self.assertIn('Approve shell command?', first.message)
             second = agent.handle('no')
             self.assertTrue(second.ok)
-            self.assertEqual(second.message, 'Git action was not executed.')
+            self.assertEqual(second.message, 'Action was not executed.')
             events_path = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))[0]
             events = _read_events(events_path)
             decision = next(event for event in events if event['event_type'] == TOOL_APPROVAL_COMPLETED)
@@ -415,36 +416,6 @@ class AgentLLMTests(unittest.TestCase):
             self.assertTrue(response.ok)
             self.assertEqual(response.message, 'Write rejected.')
             self.assertFalse((root.parent / 'escape.txt').exists())
-
-    def test_git_inspect_executes_without_approval(self):
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
-            root = Path(tmpdir)
-            shell_runner = FakeShellRunner(ShellResult(command='git status --short', returncode=0, stdout='M README.md', stderr=''))
-            llm = FakeLLM(
-                [
-                    LLMResponse(
-                        text='',
-                        tool_calls=[ToolCall(id='toolu_git_inspect_1', name='git_inspect', arguments={'args': 'status --short'})],
-                        stop_reason='tool_use',
-                    ),
-                    LLMResponse(text='Repository inspected.', tool_calls=[], stop_reason='end_turn'),
-                ]
-            )
-            logger = ObservabilityLogger(root / 'logs' / 'observability')
-            agent = Agent(
-                llm=llm,
-                shell_runner=shell_runner,
-                config=AgentConfig(llm_api_key='test'),
-                workspace_root=root,
-                observability_logger=logger,
-            )
-
-            response = agent.handle('show me git status')
-
-            self.assertTrue(response.ok)
-            self.assertFalse(response.awaiting_confirmation)
-            self.assertEqual(response.message, 'Repository inspected.')
-            self.assertEqual(shell_runner.argv_calls[0]['argv'], ['git', 'status', '--short'])
 
     def test_read_only_command_executes_without_approval(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
@@ -670,3 +641,44 @@ class AgentVerifyObservabilityTests(unittest.TestCase):
             events = _read_events(events_path)
             rejected = next(event for event in events if event['event_type'] == VERIFY_EXECUTION_REJECTED)
             self.assertIn('Only python -m unittest and python -m pytest are allowed.', rejected['payload']['error'])
+
+
+class AgentToolLoopLimitTests(unittest.TestCase):
+    def test_custom_loop_limit_is_respected(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            responses = []
+            for i in range(3):
+                responses.append(
+                    LLMResponse(
+                        text='',
+                        tool_calls=[
+                            ToolCall(
+                                id=f'toolu_read_{i}',
+                                name='read_file',
+                                arguments={'path': 'README.md'},
+                            )
+                        ],
+                        stop_reason='tool_use',
+                    )
+                )
+            llm = FakeLLM(responses)
+            (root / 'README.md').write_text('hello', encoding='utf-8')
+            logger = ObservabilityLogger(root / 'logs' / 'observability')
+            agent = Agent(
+                llm=llm,
+                config=AgentConfig(llm_api_key='test', llm_max_tool_steps=2),
+                workspace_root=root,
+                observability_logger=logger,
+            )
+            response = agent.handle('read many files')
+            self.assertFalse(response.ok)
+            self.assertIn('maximum tool interaction limit', response.stderr)
+            events_path = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))[0]
+            events = _read_events(events_path)
+            limit_event = next(event for event in events if event['event_type'] == LLM_LOOP_LIMIT_EXCEEDED)
+            self.assertEqual(limit_event['payload']['max_steps'], 2)
+
+    def test_default_loop_limit_is_25(self):
+        config = AgentConfig(llm_api_key='test')
+        self.assertEqual(config.llm_max_tool_steps, 25)

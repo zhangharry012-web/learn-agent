@@ -32,7 +32,6 @@ from agent.runtime.types import AgentResponse, PendingApproval
 from agent.shell import ShellRunner
 from agent.tools import ToolExecutionResult, build_tools
 
-MAX_LLM_TOOL_STEPS = 8
 LLM_PANIC_RETRY_MESSAGE = 'LLM 调用发生内部错误，已记录异常日志。请发送错误并重新尝试。'
 
 
@@ -110,11 +109,7 @@ class Agent:
         normalized = command.strip()
         mode = 'input'
         self._session_totals['command_count'] += 1
-        self.observability.log_event(
-            COMMAND_RECEIVED,
-            self.session_id,
-            {'command': command, 'normalized_command': normalized},
-        )
+        self._log(COMMAND_RECEIVED, {'command': command, 'normalized_command': normalized})
         if self.pending_approval is not None:
             mode = 'approval_response'
             response = self._handle_approval(normalized)
@@ -147,21 +142,12 @@ class Agent:
         else:
             mode = 'shell_fallback'
             response = self._handle_shell_turn(normalized)
-        self.observability.log_event(
-            COMMAND_COMPLETED,
-            self.session_id,
-            {
-                'command': command,
-                'mode': mode,
-                'ok': response.ok,
-                'awaiting_confirmation': response.awaiting_confirmation,
-                'returncode': response.returncode,
-                'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
-                'message': response.message,
-                'stdout': response.stdout,
-                'stderr': response.stderr,
-            },
-        )
+        self._log(COMMAND_COMPLETED, {
+            'command': command, 'mode': mode, 'ok': response.ok,
+            'awaiting_confirmation': response.awaiting_confirmation,
+            'returncode': response.returncode,
+            'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
+        })
         if response.should_exit:
             response.session_summary = self._log_session_summary(command=normalized, trigger='session_exit')
         return response
@@ -170,15 +156,10 @@ class Agent:
         started_at = time.perf_counter()
         decision = self.policy.evaluate(command)
         if not decision.allowed:
-            self.observability.log_event(
-                COMMAND_BLOCKED,
-                self.session_id,
-                {
-                    'command': command,
-                    'reason': decision.reason,
-                    'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
-                },
-            )
+            self._log(COMMAND_BLOCKED, {
+                'command': command, 'reason': decision.reason,
+                'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
+            })
             return AgentResponse(
                 ok=False,
                 command=command,
@@ -187,17 +168,11 @@ class Agent:
             )
         result = self.shell_runner.run(command)
         self._session_totals['shell_command_count'] += 1
-        self.observability.log_event(
-            SHELL_EXECUTION_COMPLETED,
-            self.session_id,
-            {
-                'command': result.command,
-                'returncode': result.returncode,
-                'stdout': result.stdout,
-                'stderr': result.stderr,
-                'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
-            },
-        )
+        self._log(SHELL_EXECUTION_COMPLETED, {
+            'command': result.command, 'returncode': result.returncode,
+            'stdout': result.stdout, 'stderr': result.stderr,
+            'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
+        })
         return AgentResponse(
             ok=result.ok,
             command=result.command,
@@ -216,15 +191,10 @@ class Agent:
             return AgentResponse(ok=False, command=user_input, stderr='No pending approval.', returncode=1)
         self.pending_approval = None
         approved = user_input.lower() in {'y', 'yes'}
-        self.observability.log_event(
-            TOOL_APPROVAL_COMPLETED,
-            self.session_id,
-            {
-                'tool_name': pending.tool_name,
-                'approved': approved,
-                'tool_input': pending.tool_input,
-            },
-        )
+        self._log(TOOL_APPROVAL_COMPLETED, {
+            'tool_name': pending.tool_name, 'approved': approved,
+            'tool_input': pending.tool_input,
+        })
         tool = self.tools[pending.tool_name]
         started_at = time.perf_counter()
         result = (
@@ -233,17 +203,11 @@ class Agent:
             else ToolExecutionResult(ok=False, content='User denied tool execution.')
         )
         self._record_tool_call(pending.tool_name, result.ok)
-        self.observability.log_event(
-            TOOL_EXECUTION_COMPLETED,
-            self.session_id,
-            {
-                'tool_name': pending.tool_name,
-                'approved': approved,
-                'ok': result.ok,
-                'tool_input': pending.tool_input,
-                'result': result.content,
-                'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
-            },
+        self._log_tool_execution(
+            pending.tool_name, approved, result.ok,
+            pending.tool_input, result.content,
+            round((time.perf_counter() - started_at) * 1000, 3),
+            after_approval=True,
         )
         tool_result_message = build_tool_result_message(
             [
@@ -267,7 +231,8 @@ class Agent:
             )
         working_messages = list(messages)
         format_retry_used = False
-        for step in range(MAX_LLM_TOOL_STEPS):
+        max_steps = self.config.llm_max_tool_steps
+        for step in range(max_steps):
             started_at = time.perf_counter()
             try:
                 response = self.llm.generate(
@@ -283,36 +248,9 @@ class Agent:
             except Exception as exc:
                 return self._handle_llm_panic(exc, original_command, step + 1, working_messages)
             self._record_llm_usage(response.usage)
-            self.observability.log_event(
-                LLM_RESPONSE_COMPLETED,
-                self.session_id,
-                {
-                    'step': step + 1,
-                    'provider': self.config.llm_provider,
-                    'model': self.config.llm_model,
-                    'max_tokens': self.current_llm_max_tokens,
-                    'message_count': len(working_messages),
-                    'tool_count': len(self.tools),
-                    'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
-                    'stop_reason': response.stop_reason,
-                    'text': response.text,
-                    'tool_calls': [
-                        {
-                            'id': tool_call.id,
-                            'name': tool_call.name,
-                            'arguments': tool_call.arguments,
-                        }
-                        for tool_call in response.tool_calls
-                    ],
-                    'usage': None
-                    if response.usage is None
-                    else {
-                        'input_tokens': response.usage.input_tokens,
-                        'output_tokens': response.usage.output_tokens,
-                        'total_tokens': response.usage.total_tokens,
-                    },
-                },
-            )
+            self._log(LLM_RESPONSE_COMPLETED, self._build_llm_response_payload(
+                response, step + 1, working_messages, started_at,
+            ))
             assistant_message = build_assistant_message(response.text, response.tool_calls)
             if response.tool_calls:
                 tool_results: List[ToolResult] = []
@@ -327,15 +265,10 @@ class Agent:
                             tool_use_id=tool_call.id,
                             tool_input=tool_input,
                         )
-                        self.observability.log_event(
-                            TOOL_APPROVAL_REQUESTED,
-                            self.session_id,
-                            {
-                                'tool_name': tool_call.name,
-                                'tool_input': tool_input,
-                                'tool_use_id': tool_call.id,
-                            },
-                        )
+                        self._log(TOOL_APPROVAL_REQUESTED, {
+                            'tool_name': tool_call.name,
+                            'tool_input': tool_input, 'tool_use_id': tool_call.id,
+                        })
                         return AgentResponse(
                             ok=True,
                             command=original_command,
@@ -345,17 +278,10 @@ class Agent:
                     tool_started_at = time.perf_counter()
                     result = tool.execute(tool_input)
                     self._record_tool_call(tool_call.name, result.ok)
-                    self.observability.log_event(
-                        TOOL_EXECUTION_COMPLETED,
-                        self.session_id,
-                        {
-                            'tool_name': tool_call.name,
-                            'approved': True,
-                            'ok': result.ok,
-                            'tool_input': tool_input,
-                            'result': result.content,
-                            'duration_ms': round((time.perf_counter() - tool_started_at) * 1000, 3),
-                        },
+                    self._log_tool_execution(
+                        tool_call.name, True, result.ok,
+                        tool_input, result.content,
+                        round((time.perf_counter() - tool_started_at) * 1000, 3),
                     )
                     tool_results.append(
                         ToolResult(
@@ -376,14 +302,9 @@ class Agent:
                 command=original_command,
                 message=final_text or 'No text response returned.',
             )
-        self.observability.log_event(
-            LLM_LOOP_LIMIT_EXCEEDED,
-            self.session_id,
-            {
-                'command': original_command,
-                'max_steps': MAX_LLM_TOOL_STEPS,
-            },
-        )
+        self._log(LLM_LOOP_LIMIT_EXCEEDED, {
+            'command': original_command, 'max_steps': max_steps,
+        })
         return AgentResponse(
             ok=False,
             command=original_command,
@@ -392,8 +313,54 @@ class Agent:
         )
 
 
-    def _log_verify_event(self, event_type: str, payload: Dict[str, Any]) -> None:
+    def _log(self, event_type: str, payload: Dict[str, Any]) -> None:
         self.observability.log_event(event_type, self.session_id, payload)
+
+    def _log_verify_event(self, event_type: str, payload: Dict[str, Any]) -> None:
+        self._log(event_type, payload)
+
+    def _log_tool_execution(
+        self, tool_name: str, approved: bool, ok: bool,
+        tool_input: Dict[str, Any], result_content: str,
+        duration_ms: float, *, after_approval: bool = False,
+    ) -> None:
+        payload: Dict[str, Any] = {
+            'tool_name': tool_name,
+            'approved': approved,
+            'ok': ok,
+            'duration_ms': duration_ms,
+        }
+        if after_approval:
+            payload['tool_input'] = '[see tool.approval.requested]'
+        else:
+            payload['tool_input'] = self.observability.preview_tool_input(tool_input)
+        payload['result'] = result_content
+        self._log(TOOL_EXECUTION_COMPLETED, payload)
+
+    def _build_llm_response_payload(
+        self, response: Any, step: int, messages: List[Dict[str, Any]], started_at: float,
+    ) -> Dict[str, Any]:
+        usage = response.usage
+        return {
+            'step': step,
+            'provider': self.config.llm_provider,
+            'model': self.config.llm_model,
+            'max_tokens': self.current_llm_max_tokens,
+            'message_count': len(messages),
+            'tool_count': len(self.tools),
+            'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
+            'stop_reason': response.stop_reason,
+            'text': response.text,
+            'tool_calls': [
+                {'id': tc.id, 'name': tc.name, 'arguments': self.observability.preview_tool_input(tc.arguments)}
+                for tc in response.tool_calls
+            ],
+            'usage': None if usage is None else {
+                'input_tokens': usage.input_tokens,
+                'output_tokens': usage.output_tokens,
+                'total_tokens': usage.total_tokens,
+            },
+        }
 
     def _handle_llm_panic(
         self,
@@ -412,17 +379,12 @@ class Agent:
             },
             self.exception_log_dir,
         )
-        self.observability.log_event(
-            LLM_PANIC,
-            self.session_id,
-            {
-                'command': original_command,
-                'step': step,
-                'error_type': error.__class__.__name__,
-                'error_message': str(error),
-                'exception_log_path': None if log_path is None else str(log_path),
-            },
-        )
+        self._log(LLM_PANIC, {
+            'command': original_command, 'step': step,
+            'error_type': error.__class__.__name__,
+            'error_message': str(error),
+            'exception_log_path': None if log_path is None else str(log_path),
+        })
         return AgentResponse(
             ok=False,
             command=original_command,
@@ -478,5 +440,5 @@ class Agent:
         if self._session_totals['summary_emitted']:
             return summary
         self._session_totals['summary_emitted'] = True
-        self.observability.log_event(SESSION_SUMMARY, self.session_id, summary)
+        self._log(SESSION_SUMMARY, summary)
         return summary

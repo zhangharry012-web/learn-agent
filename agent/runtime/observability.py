@@ -13,6 +13,9 @@ PARTITION_FORMAT = DATE_FORMAT + ' ' + HOUR_FORMAT
 
 DEFAULT_RETENTION_HOURS = 24 * 30
 
+TOOL_INPUT_CONTENT_PREVIEW_CHARS = 200
+TOOL_INPUT_LARGE_KEYS = frozenset({'content', 'search', 'replace'})
+
 
 class ObservabilityLogger:
     def __init__(
@@ -36,22 +39,30 @@ class ObservabilityLogger:
         if not self.enabled:
             return
         now = datetime.now(timezone.utc)
+        ts = self._format_timestamp(now)
+        previewed = self.preview(payload)
         entry = {
-            'timestamp': self._format_timestamp(now),
+            'timestamp': ts,
             'event_type': event_type,
             'session_id': session_id,
-            'payload': self.preview(payload),
+            'payload': previewed,
+        }
+        session_entry = {
+            'timestamp': ts,
+            'event_type': event_type,
+            'payload': previewed,
         }
         try:
             self._ensure_dirs()
-            serialized = json.dumps(entry, ensure_ascii=False) + '\n'
+            events_line = json.dumps(entry, ensure_ascii=False) + '\n'
+            session_line = json.dumps(session_entry, ensure_ascii=False) + '\n'
             events_path, session_path = self._event_paths(session_id, now)
             self._ensure_parent(events_path)
             self._ensure_parent(session_path)
             with events_path.open('a', encoding='utf-8') as handle:
-                handle.write(serialized)
+                handle.write(events_line)
             with session_path.open('a', encoding='utf-8') as handle:
-                handle.write(serialized)
+                handle.write(session_line)
             self._cleanup_if_needed(now)
         except Exception:
             return
@@ -84,6 +95,17 @@ class ObservabilityLogger:
         if isinstance(value, list):
             return [self.preview(item) for item in value]
         return value
+
+    def preview_tool_input(self, tool_input: Any) -> Any:
+        if not isinstance(tool_input, dict):
+            return self.preview(tool_input)
+        result = {}
+        for key, val in tool_input.items():
+            if key in TOOL_INPUT_LARGE_KEYS and isinstance(val, str) and len(val) > TOOL_INPUT_CONTENT_PREVIEW_CHARS:
+                result[key] = val[:TOOL_INPUT_CONTENT_PREVIEW_CHARS] + f'... [truncated {len(val) - TOOL_INPUT_CONTENT_PREVIEW_CHARS} chars]'
+            else:
+                result[key] = self.preview(val)
+        return result
 
     def _format_timestamp(self, moment: datetime) -> str:
         return moment.isoformat(timespec='milliseconds').replace('+00:00', 'Z')

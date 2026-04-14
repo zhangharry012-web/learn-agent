@@ -8,6 +8,7 @@ DEFAULT_PROVIDER = 'anthropic'
 DEFAULT_MODEL = 'claude-sonnet-4-20250514'
 DEFAULT_LLM_MAX_TOKENS = 8 * 1024
 FALLBACK_LLM_MAX_TOKENS = 16 * 1024
+DEFAULT_MAX_TOOL_STEPS = 25
 DEFAULT_VERIFY_TIMEOUT_SEC = 120
 ENV_FILE_NAME = '.env'
 SUPPORTED_OPENAI_COMPATIBLE_PROVIDERS: FrozenSet[str] = frozenset(
@@ -75,8 +76,7 @@ class AgentConfig:
         'read_file',
         'write_file',
         'edit_file',
-        'git_run',
-        'git_inspect',
+
         'exec',
         'inspect_path',
         'read_only_command',
@@ -106,6 +106,9 @@ class AgentConfig:
     )
     verify_require_repo_policy: bool = field(
         default_factory=lambda: _get_env_bool('VERIFY_REQUIRE_REPO_POLICY', False)
+    )
+    llm_max_tool_steps: int = field(
+        default_factory=lambda: _get_env_int('LLM_MAX_TOOL_STEPS', DEFAULT_MAX_TOOL_STEPS)
     )
 
     @property
