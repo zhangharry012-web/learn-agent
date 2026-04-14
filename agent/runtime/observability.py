@@ -13,6 +13,9 @@ PARTITION_FORMAT = DATE_FORMAT + ' ' + HOUR_FORMAT
 
 DEFAULT_RETENTION_HOURS = 24 * 30
 
+TOOL_INPUT_CONTENT_PREVIEW_CHARS = 200
+TOOL_INPUT_LARGE_KEYS = frozenset({'content'})
+
 
 class ObservabilityLogger:
     def __init__(
@@ -92,6 +95,17 @@ class ObservabilityLogger:
         if isinstance(value, list):
             return [self.preview(item) for item in value]
         return value
+
+    def preview_tool_input(self, tool_input: Any) -> Any:
+        if not isinstance(tool_input, dict):
+            return self.preview(tool_input)
+        result = {}
+        for key, val in tool_input.items():
+            if key in TOOL_INPUT_LARGE_KEYS and isinstance(val, str) and len(val) > TOOL_INPUT_CONTENT_PREVIEW_CHARS:
+                result[key] = val[:TOOL_INPUT_CONTENT_PREVIEW_CHARS] + f'... [truncated {len(val) - TOOL_INPUT_CONTENT_PREVIEW_CHARS} chars]'
+            else:
+                result[key] = self.preview(val)
+        return result
 
     def _format_timestamp(self, moment: datetime) -> str:
         return moment.isoformat(timespec='milliseconds').replace('+00:00', 'Z')

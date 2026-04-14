@@ -147,7 +147,6 @@ class Agent:
             'awaiting_confirmation': response.awaiting_confirmation,
             'returncode': response.returncode,
             'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
-            'message': response.message, 'stdout': response.stdout, 'stderr': response.stderr,
         })
         if response.should_exit:
             response.session_summary = self._log_session_summary(command=normalized, trigger='session_exit')
@@ -204,12 +203,12 @@ class Agent:
             else ToolExecutionResult(ok=False, content='User denied tool execution.')
         )
         self._record_tool_call(pending.tool_name, result.ok)
-        self._log(TOOL_EXECUTION_COMPLETED, {
-            'tool_name': pending.tool_name, 'approved': approved,
-            'ok': result.ok, 'tool_input': pending.tool_input,
-            'result': result.content,
-            'duration_ms': round((time.perf_counter() - started_at) * 1000, 3),
-        })
+        self._log_tool_execution(
+            pending.tool_name, approved, result.ok,
+            pending.tool_input, result.content,
+            round((time.perf_counter() - started_at) * 1000, 3),
+            after_approval=True,
+        )
         tool_result_message = build_tool_result_message(
             [
                 ToolResult(
@@ -279,12 +278,11 @@ class Agent:
                     tool_started_at = time.perf_counter()
                     result = tool.execute(tool_input)
                     self._record_tool_call(tool_call.name, result.ok)
-                    self._log(TOOL_EXECUTION_COMPLETED, {
-                        'tool_name': tool_call.name, 'approved': True,
-                        'ok': result.ok, 'tool_input': tool_input,
-                        'result': result.content,
-                        'duration_ms': round((time.perf_counter() - tool_started_at) * 1000, 3),
-                    })
+                    self._log_tool_execution(
+                        tool_call.name, True, result.ok,
+                        tool_input, result.content,
+                        round((time.perf_counter() - tool_started_at) * 1000, 3),
+                    )
                     tool_results.append(
                         ToolResult(
                             tool_call_id=tool_call.id,
@@ -320,6 +318,24 @@ class Agent:
 
     def _log_verify_event(self, event_type: str, payload: Dict[str, Any]) -> None:
         self._log(event_type, payload)
+
+    def _log_tool_execution(
+        self, tool_name: str, approved: bool, ok: bool,
+        tool_input: Dict[str, Any], result_content: str,
+        duration_ms: float, *, after_approval: bool = False,
+    ) -> None:
+        payload: Dict[str, Any] = {
+            'tool_name': tool_name,
+            'approved': approved,
+            'ok': ok,
+            'duration_ms': duration_ms,
+        }
+        if after_approval:
+            payload['tool_input'] = '[see tool.approval.requested]'
+        else:
+            payload['tool_input'] = self.observability.preview_tool_input(tool_input)
+        payload['result'] = result_content
+        self._log(TOOL_EXECUTION_COMPLETED, payload)
 
     def _build_llm_response_payload(
         self, response: Any, step: int, messages: List[Dict[str, Any]], started_at: float,
