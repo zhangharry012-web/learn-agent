@@ -14,6 +14,7 @@ from agent.runtime.events import (
     COMMAND_RECEIVED,
     LLM_PANIC,
     LLM_RESPONSE_COMPLETED,
+    LLM_LOOP_LIMIT_EXCEEDED,
     SESSION_SUMMARY,
     SHELL_EXECUTION_COMPLETED,
     VERIFY_EXECUTION_COMPLETED,
@@ -670,3 +671,44 @@ class AgentVerifyObservabilityTests(unittest.TestCase):
             events = _read_events(events_path)
             rejected = next(event for event in events if event['event_type'] == VERIFY_EXECUTION_REJECTED)
             self.assertIn('Only python -m unittest and python -m pytest are allowed.', rejected['payload']['error'])
+
+
+class AgentToolLoopLimitTests(unittest.TestCase):
+    def test_custom_loop_limit_is_respected(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            responses = []
+            for i in range(3):
+                responses.append(
+                    LLMResponse(
+                        text='',
+                        tool_calls=[
+                            ToolCall(
+                                id=f'toolu_read_{i}',
+                                name='read_file',
+                                arguments={'path': 'README.md'},
+                            )
+                        ],
+                        stop_reason='tool_use',
+                    )
+                )
+            llm = FakeLLM(responses)
+            (root / 'README.md').write_text('hello', encoding='utf-8')
+            logger = ObservabilityLogger(root / 'logs' / 'observability')
+            agent = Agent(
+                llm=llm,
+                config=AgentConfig(llm_api_key='test', llm_max_tool_steps=2),
+                workspace_root=root,
+                observability_logger=logger,
+            )
+            response = agent.handle('read many files')
+            self.assertFalse(response.ok)
+            self.assertIn('maximum tool interaction limit', response.stderr)
+            events_path = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))[0]
+            events = _read_events(events_path)
+            limit_event = next(event for event in events if event['event_type'] == LLM_LOOP_LIMIT_EXCEEDED)
+            self.assertEqual(limit_event['payload']['max_steps'], 2)
+
+    def test_default_loop_limit_is_25(self):
+        config = AgentConfig(llm_api_key='test')
+        self.assertEqual(config.llm_max_tool_steps, 25)

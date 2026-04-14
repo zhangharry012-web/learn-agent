@@ -28,5 +28,8 @@ def build_system_prompt() -> str:
         'rewrites. Use git_run only for git operations. Use exec for direct shell commands such '
         'as inspection, validation, or local execution. Never request more than one approval-'
         'required tool call in the same response. If an approval-required action is needed, '
-        'request it and wait for approval. Summarize results clearly after tool execution.'
+        'request it and wait for approval. Summarize results clearly after tool execution. '
+        'When analyzing a project, plan your approach before executing to minimize the number '
+        'of tool interactions needed. Batch related inspections efficiently — for example, '
+        'combine multiple file reads in a single turn when possible.'
     )

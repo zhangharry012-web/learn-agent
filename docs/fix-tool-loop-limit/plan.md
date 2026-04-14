@@ -100,10 +100,10 @@ LLM_MAX_TOOL_STEPS=25
 
 ## TODO
 
-- [ ] 1. `agent/config.py`: 新增 `DEFAULT_MAX_TOOL_STEPS` 常量和 `llm_max_tool_steps` 字段
-- [ ] 2. `agent/runtime/agent.py`: 删除硬编码常量，从 `self.config.llm_max_tool_steps` 读取
-- [ ] 3. `agent/runtime/messages.py`: 优化 system prompt 添加效率指引
-- [ ] 4. `.env.example`: 文档化 `LLM_MAX_TOOL_STEPS` 环境变量
-- [ ] 5. `tests/test_agent_runtime.py`: 补充 loop limit 可配置的测试
-- [ ] 6. 运行测试确保所有测试通过
-- [ ] 7. 推送到远端分支
+- [x] 1. `agent/config.py`: 新增 `DEFAULT_MAX_TOOL_STEPS` 常量和 `llm_max_tool_steps` 字段
+- [x] 2. `agent/runtime/agent.py`: 删除硬编码常量，从 `self.config.llm_max_tool_steps` 读取
+- [x] 3. `agent/runtime/messages.py`: 优化 system prompt 添加效率指引
+- [x] 4. `.env.example`: 文档化 `LLM_MAX_TOOL_STEPS` 环境变量
+- [x] 5. `tests/test_agent_runtime.py`: 补充 loop limit 可配置的测试
+- [x] 6. 运行测试确保所有测试通过（19/19 passed）
+- [x] 7. 推送到远端分支

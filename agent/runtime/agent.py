@@ -32,7 +32,6 @@ from agent.runtime.types import AgentResponse, PendingApproval
 from agent.shell import ShellRunner
 from agent.tools import ToolExecutionResult, build_tools
 
-MAX_LLM_TOOL_STEPS = 8
 LLM_PANIC_RETRY_MESSAGE = 'LLM 调用发生内部错误，已记录异常日志。请发送错误并重新尝试。'
 
 
@@ -267,7 +266,8 @@ class Agent:
             )
         working_messages = list(messages)
         format_retry_used = False
-        for step in range(MAX_LLM_TOOL_STEPS):
+        max_steps = self.config.llm_max_tool_steps
+        for step in range(max_steps):
             started_at = time.perf_counter()
             try:
                 response = self.llm.generate(
@@ -381,7 +381,7 @@ class Agent:
             self.session_id,
             {
                 'command': original_command,
-                'max_steps': MAX_LLM_TOOL_STEPS,
+                'max_steps': max_steps,
             },
         )
         return AgentResponse(
