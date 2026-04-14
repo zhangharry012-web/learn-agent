@@ -36,22 +36,30 @@ class ObservabilityLogger:
         if not self.enabled:
             return
         now = datetime.now(timezone.utc)
+        ts = self._format_timestamp(now)
+        previewed = self.preview(payload)
         entry = {
-            'timestamp': self._format_timestamp(now),
+            'timestamp': ts,
             'event_type': event_type,
             'session_id': session_id,
-            'payload': self.preview(payload),
+            'payload': previewed,
+        }
+        session_entry = {
+            'timestamp': ts,
+            'event_type': event_type,
+            'payload': previewed,
         }
         try:
             self._ensure_dirs()
-            serialized = json.dumps(entry, ensure_ascii=False) + '\n'
+            events_line = json.dumps(entry, ensure_ascii=False) + '\n'
+            session_line = json.dumps(session_entry, ensure_ascii=False) + '\n'
             events_path, session_path = self._event_paths(session_id, now)
             self._ensure_parent(events_path)
             self._ensure_parent(session_path)
             with events_path.open('a', encoding='utf-8') as handle:
-                handle.write(serialized)
+                handle.write(events_line)
             with session_path.open('a', encoding='utf-8') as handle:
-                handle.write(serialized)
+                handle.write(session_line)
             self._cleanup_if_needed(now)
         except Exception:
             return
