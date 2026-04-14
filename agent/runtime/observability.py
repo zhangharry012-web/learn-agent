@@ -14,7 +14,7 @@ PARTITION_FORMAT = DATE_FORMAT + ' ' + HOUR_FORMAT
 DEFAULT_RETENTION_HOURS = 24 * 30
 
 TOOL_INPUT_CONTENT_PREVIEW_CHARS = 200
-TOOL_INPUT_LARGE_KEYS = frozenset({'content'})
+TOOL_INPUT_LARGE_KEYS = frozenset({'content', 'search', 'replace'})
 
 
 class ObservabilityLogger:

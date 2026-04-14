@@ -264,18 +264,18 @@ class AgentLLMTests(unittest.TestCase):
             self.assertEqual(second.message, 'Command executed.')
             self.assertEqual(shell_runner.command_calls[0]['command'], 'pwd')
 
-    def test_git_requires_approval_and_can_be_denied(self):
+    def test_exec_approval_can_be_denied(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
             root = Path(tmpdir)
-            shell_result = ShellResult(command='git status --short', returncode=0, stdout='', stderr='')
+            shell_result = ShellResult(command='rm -rf temp', returncode=0, stdout='', stderr='')
             llm = FakeLLM(
                 [
                     LLMResponse(
                         text='',
-                        tool_calls=[ToolCall(id='toolu_git_1', name='git_run', arguments={'args': 'status --short'})],
+                        tool_calls=[ToolCall(id='toolu_exec_deny_1', name='exec', arguments={'command': 'rm -rf temp'})],
                         stop_reason='tool_use',
                     ),
-                    LLMResponse(text='Git action was not executed.', tool_calls=[], stop_reason='end_turn'),
+                    LLMResponse(text='Action was not executed.', tool_calls=[], stop_reason='end_turn'),
                 ]
             )
             logger = ObservabilityLogger(root / 'logs' / 'observability')
@@ -286,12 +286,12 @@ class AgentLLMTests(unittest.TestCase):
                 workspace_root=root,
                 observability_logger=logger,
             )
-            first = agent.handle('show git status')
+            first = agent.handle('delete temp directory')
             self.assertTrue(first.awaiting_confirmation)
-            self.assertIn('Approve git command?', first.message)
+            self.assertIn('Approve shell command?', first.message)
             second = agent.handle('no')
             self.assertTrue(second.ok)
-            self.assertEqual(second.message, 'Git action was not executed.')
+            self.assertEqual(second.message, 'Action was not executed.')
             events_path = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))[0]
             events = _read_events(events_path)
             decision = next(event for event in events if event['event_type'] == TOOL_APPROVAL_COMPLETED)

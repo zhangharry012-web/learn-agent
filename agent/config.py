@@ -76,7 +76,6 @@ class AgentConfig:
         'read_file',
         'write_file',
         'edit_file',
-        'git_run',
         'git_inspect',
         'exec',
         'inspect_path',

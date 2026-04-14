@@ -352,7 +352,7 @@ class Agent:
             'stop_reason': response.stop_reason,
             'text': response.text,
             'tool_calls': [
-                {'id': tc.id, 'name': tc.name, 'arguments': tc.arguments}
+                {'id': tc.id, 'name': tc.name, 'arguments': self.observability.preview_tool_input(tc.arguments)}
                 for tc in response.tool_calls
             ],
             'usage': None if usage is None else {
