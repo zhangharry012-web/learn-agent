@@ -56,6 +56,8 @@ class Agent:
             workspace_root=self.workspace_root,
             shell_runner=self.shell_runner,
             enabled_tools=self.config.enabled_tools,
+            config=self.config,
+            verify_event_logger=self._log_verify_event,
         )
         self.history: List[Dict[str, Any]] = []
         self.pending_approval: Optional[PendingApproval] = None
@@ -388,6 +390,10 @@ class Agent:
             stderr='LLM exceeded the maximum tool interaction limit.',
             returncode=1,
         )
+
+
+    def _log_verify_event(self, event_type: str, payload: Dict[str, Any]) -> None:
+        self.observability.log_event(event_type, self.session_id, payload)
 
     def _handle_llm_panic(
         self,
