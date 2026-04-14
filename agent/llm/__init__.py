@@ -6,7 +6,7 @@ from agent.config import DEFAULT_PROVIDER, PROVIDER_CLASS_ALIASES
 from agent.llm.anthropic_client import AnthropicLLM
 from agent.llm.base import BaseLLMClient, extract_text
 from agent.llm.openai_client import OpenAICompatibleLLM
-from agent.llm.types import LLMResponse, ToolCall, ToolResult
+from agent.llm.types import LLMResponse, TokenUsage, ToolCall, ToolResult
 
 LLM_FACTORY_BY_PROVIDER_CLASS: Dict[str, Callable[..., BaseLLMClient]] = {
     DEFAULT_PROVIDER: AnthropicLLM,
@@ -39,6 +39,7 @@ __all__ = [
     'BaseLLMClient',
     'LLMResponse',
     'OpenAICompatibleLLM',
+    'TokenUsage',
     'ToolCall',
     'ToolResult',
     'create_llm',

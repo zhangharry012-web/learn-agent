@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 
 @dataclass
@@ -24,14 +24,16 @@ class ShellRunner:
     def __init__(self, timeout: int = 15) -> None:
         self.timeout = timeout
 
-    def run(self, command: str) -> ShellResult:
+    def run(self, command: str, cwd: Path = None, timeout: Optional[int] = None) -> ShellResult:
+        resolved_timeout = timeout or self.timeout
         try:
             completed = subprocess.run(
                 command,
                 shell=True,
                 text=True,
                 capture_output=True,
-                timeout=self.timeout,
+                timeout=resolved_timeout,
+                cwd=str(cwd) if cwd is not None else None,
             )
             return ShellResult(
                 command=command,
@@ -43,29 +45,30 @@ class ShellRunner:
             return ShellResult(
                 command=command,
                 returncode=124,
-                stdout="",
-                stderr=f"Command timed out after {self.timeout} seconds.",
+                stdout='',
+                stderr=f'Command timed out after {resolved_timeout} seconds.',
             )
 
-    def run_argv(self, argv: List[str], cwd: Path = None) -> ShellResult:
+    def run_argv(self, argv: List[str], cwd: Path = None, timeout: Optional[int] = None) -> ShellResult:
+        resolved_timeout = timeout or self.timeout
         try:
             completed = subprocess.run(
                 argv,
                 text=True,
                 capture_output=True,
-                timeout=self.timeout,
+                timeout=resolved_timeout,
                 cwd=str(cwd) if cwd is not None else None,
             )
             return ShellResult(
-                command=" ".join(argv),
+                command=' '.join(argv),
                 returncode=completed.returncode,
                 stdout=completed.stdout.strip(),
                 stderr=completed.stderr.strip(),
             )
         except subprocess.TimeoutExpired:
             return ShellResult(
-                command=" ".join(argv),
+                command=' '.join(argv),
                 returncode=124,
-                stdout="",
-                stderr=f"Command timed out after {self.timeout} seconds.",
+                stdout='',
+                stderr=f'Command timed out after {resolved_timeout} seconds.',
             )

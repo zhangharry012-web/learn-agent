@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from agent.llm.base import BaseLLMClient
-from agent.llm.types import LLMResponse, ToolCall
+from agent.llm.types import LLMResponse, LLMToolCallFormatError, TokenUsage, ToolCall
 
 try:
     from openai import OpenAI
@@ -115,9 +115,9 @@ class OpenAICompatibleLLM(BaseLLMClient):
             try:
                 parsed = json.loads(arguments)
             except json.JSONDecodeError as exc:
-                raise ValueError('Invalid tool arguments from provider') from exc
+                raise LLMToolCallFormatError('Invalid tool arguments from provider') from exc
             if not isinstance(parsed, dict):
-                raise ValueError('Invalid tool arguments from provider')
+                raise LLMToolCallFormatError('Invalid tool arguments from provider')
             tool_calls.append(
                 ToolCall(
                     id=str(tool_call.id),
@@ -130,6 +130,7 @@ class OpenAICompatibleLLM(BaseLLMClient):
             text=text.strip(),
             tool_calls=tool_calls,
             stop_reason=_normalize_openai_stop_reason(getattr(choice, 'finish_reason', None)),
+            usage=_extract_openai_usage(getattr(response, 'usage', None)),
         )
 
 
@@ -141,3 +142,16 @@ def _normalize_openai_stop_reason(stop_reason: Any) -> str:
     if stop_reason == 'stop' or stop_reason is None:
         return 'end_turn'
     return 'other'
+
+
+def _extract_openai_usage(usage: Any) -> Optional[TokenUsage]:
+    if usage is None:
+        return None
+    input_tokens = int(getattr(usage, 'prompt_tokens', 0) or 0)
+    output_tokens = int(getattr(usage, 'completion_tokens', 0) or 0)
+    total_tokens = int(getattr(usage, 'total_tokens', 0) or (input_tokens + output_tokens))
+    return TokenUsage(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+    )

@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "default_timeout_sec": 120,
+  "deny_keywords": [
+    "install",
+    "publish",
+    "deploy",
+    "curl",
+    "wget",
+    "bash",
+    "sh",
+    "npx"
+  ],
+  "allow": [
+    {
+      "id": "python-unittest",
+      "argv_prefix": ["python", "-m", "unittest"],
+      "cwd": ".",
+      "allowed_arg_regex": ["^discover$", "^-s$", "^-p$", "^[A-Za-z0-9_./-]+$"],
+      "description": "Run Python unittest targets inside the workspace."
+    },
+    {
+      "id": "python-pytest",
+      "argv_prefix": ["python", "-m", "pytest"],
+      "cwd": ".",
+      "allowed_arg_regex": ["^-q$", "^-x$", "^-k$", "^-m$", "^[A-Za-z0-9_./:-]+$"],
+      "description": "Run Python pytest verification targets."
+    },
+    {
+      "id": "go-test",
+      "argv_prefix": ["go", "test"],
+      "cwd": ".",
+      "allowed_arg_regex": ["^-run$", "^-count=1$", "^-v$", "^\./\.\.\.$", "^\./[A-Za-z0-9_./-]+$", "^[A-Za-z0-9_./-]+$"],
+      "description": "Run Go test verification flows."
+    },
+    {
+      "id": "npm-test",
+      "argv_exact": ["npm", "run", "test"],
+      "cwd": ".",
+      "description": "Run the default npm test script."
+    },
+    {
+      "id": "npm-lint",
+      "argv_exact": ["npm", "run", "lint"],
+      "cwd": ".",
+      "max_timeout_sec": 60,
+      "description": "Run the default npm lint script."
+    },
+    {
+      "id": "npm-build",
+      "argv_exact": ["npm", "run", "build"],
+      "cwd": ".",
+      "max_timeout_sec": 180,
+      "description": "Run the default npm build script."
+    },
+    {
+      "id": "npm-typecheck",
+      "argv_exact": ["npm", "run", "typecheck"],
+      "cwd": ".",
+      "max_timeout_sec": 120,
+      "description": "Run the default npm typecheck script."
+    }
+  ]
+}
