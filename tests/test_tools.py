@@ -177,6 +177,31 @@ class ToolTests(unittest.TestCase):
             self.assertFalse(result.ok)
             self.assertEqual(result.content, 'Path escapes the workspace root.')
 
+    def test_write_file_tool_delete_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / 'temp.txt'
+            target.write_text('temporary content', encoding='utf-8')
+            tool = WriteFileTool(root)
+
+            result = tool.execute({'path': 'temp.txt', 'mode': 'delete'})
+
+            self.assertTrue(result.ok)
+            payload = json.loads(result.content)
+            self.assertEqual(payload['mode'], 'delete')
+            self.assertTrue(payload['deleted'])
+            self.assertFalse(target.exists())
+
+    def test_write_file_tool_delete_rejects_nonexistent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tool = WriteFileTool(root)
+
+            result = tool.execute({'path': 'nonexistent.txt', 'mode': 'delete'})
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.content, 'Target file does not exist.')
+
     def test_edit_file_tool_rejects_path_escape(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -8,8 +8,7 @@
     "curl",
     "wget",
     "bash",
-    "sh",
-    "npx"
+    "sh"
   ],
   "allow": [
     {
@@ -59,6 +58,20 @@
       "cwd": ".",
       "max_timeout_sec": 120,
       "description": "Run the default npm typecheck script."
+    },
+    {
+      "id": "npx-ts-node",
+      "argv_prefix": ["npx", "ts-node"],
+      "cwd": ".",
+      "allowed_arg_regex": ["^[A-Za-z0-9_./-]+\\.ts$"],
+      "description": "Run a TypeScript file via npx ts-node."
+    },
+    {
+      "id": "npx-tsx",
+      "argv_prefix": ["npx", "tsx"],
+      "cwd": ".",
+      "allowed_arg_regex": ["^[A-Za-z0-9_./-]+\\.ts$", "^[A-Za-z0-9_./-]+\\.tsx$"],
+      "description": "Run a TypeScript file via npx tsx."
     }
   ]
 }
