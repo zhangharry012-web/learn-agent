@@ -858,3 +858,29 @@ tests/test_verify_policy.py
 - [ ] 增加 verify 专用 observability 事件
 - [ ] 增加 `tests/test_verify_policy.py`
 - [ ] 评估基于变更文件映射最小验证集的增强方案
+
+
+---
+
+## 当前实现状态（第二轮后）
+
+### 已完成
+
+- [x] 新增 `verify_command` 工具，并保持 `exec` 为审批兜底
+- [x] 支持 Go / Python / TypeScript 常见验证命令
+- [x] 支持仓库级策略文件路径 `.agent/verify-policy.json`
+- [x] README 已同步 verify 配置与使用边界
+- [x] 已补默认 `.agent/verify-policy.json` 示例文件，便于仓库快速定制规则
+- [x] 已增加 verify 专属可观测性事件：
+  - `verify.execution.requested`
+  - `verify.execution.completed`
+  - `verify.execution.rejected`
+
+### 本轮落地说明
+
+当前实现中，`verify_command` 在进入执行前会记录 `verify.execution.requested`。当命令通过校验并执行完成后，会记录 `verify.execution.completed`；当命令因 shell token、语言限制、cwd/path 越界、仓库策略不匹配、策略文件格式错误等原因被拒绝时，会记录 `verify.execution.rejected`。
+
+这些事件与现有的 `tool.execution.completed` 并存：
+
+- verify 事件用于描述 `verify_command` 的专属判定与执行阶段；
+- tool 事件继续保留通用工具层审计语义。

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping, Optional
 
 from agent.config import AgentConfig
 from agent.shell import ShellRunner
@@ -20,6 +20,12 @@ from agent.verify import (
     timeout_for_rule,
     validate_language_command,
 )
+
+VERIFY_EXECUTION_REQUESTED = 'verify.execution.requested'
+VERIFY_EXECUTION_COMPLETED = 'verify.execution.completed'
+VERIFY_EXECUTION_REJECTED = 'verify.execution.rejected'
+
+VerifyEventLogger = Callable[[str, Mapping[str, Any]], None]
 
 
 class VerifyCommandTool(BaseTool):
@@ -54,24 +60,65 @@ class VerifyCommandTool(BaseTool):
         workspace_root: Path,
         shell_runner: ShellRunner,
         config: AgentConfig,
+        event_logger: Optional[VerifyEventLogger] = None,
     ) -> None:
         super().__init__(workspace_root)
         self.shell_runner = shell_runner
         self.config = config
+        self.event_logger = event_logger
 
     def execute(self, payload: Mapping[str, Any]) -> ToolExecutionResult:
+        argv = []
+        relative_cwd = '.'
+        reason = str(payload.get('reason') or '')
         try:
             argv = self._parse_argv(payload)
-            ensure_no_shell_tokens(argv)
-            validate_language_command(argv)
             cwd = resolve_cwd(self.workspace_root, str(payload.get('cwd') or '.'))
             relative_cwd = relative_path(self.workspace_root, cwd)
+            self._emit(
+                VERIFY_EXECUTION_REQUESTED,
+                {
+                    'argv': argv,
+                    'cwd': relative_cwd,
+                    'reason': reason,
+                },
+            )
+            ensure_no_shell_tokens(argv)
+            validate_language_command(argv)
             path_args = extract_path_args(argv, self.workspace_root)
             rule = select_rule(argv, relative_cwd, path_args, self.workspace_root, self.config)
-            result = self.shell_runner.run_argv(argv, cwd=cwd, timeout=timeout_for_rule(rule, self.config))
-            return ToolExecutionResult(ok=result.ok, content=json_result(result, argv, relative_cwd, rule))
+            timeout_sec = timeout_for_rule(rule, self.config)
+            result = self.shell_runner.run_argv(argv, cwd=cwd, timeout=timeout_sec)
+            content = json_result(result, argv, relative_cwd, rule)
+            self._emit(
+                VERIFY_EXECUTION_COMPLETED,
+                {
+                    'argv': argv,
+                    'cwd': relative_cwd,
+                    'reason': reason,
+                    'rule_id': rule.rule_id,
+                    'timeout_sec': timeout_sec,
+                    'returncode': result.returncode,
+                    'ok': result.ok,
+                },
+            )
+            return ToolExecutionResult(ok=result.ok, content=content)
         except (VerifyCommandRejected, VerifyPolicyMismatch, VerifyPolicyError, ValueError) as exc:
+            self._emit(
+                VERIFY_EXECUTION_REJECTED,
+                {
+                    'argv': argv,
+                    'cwd': relative_cwd,
+                    'reason': reason,
+                    'error': str(exc),
+                },
+            )
             return ToolExecutionResult(ok=False, content=str(exc))
+
+    def _emit(self, event_type: str, payload: Mapping[str, Any]) -> None:
+        if self.event_logger is None:
+            return
+        self.event_logger(event_type, payload)
 
     def _parse_argv(self, payload: Mapping[str, Any]) -> list[str]:
         raw_argv = payload.get('argv')

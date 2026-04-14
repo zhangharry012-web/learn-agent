@@ -16,6 +16,9 @@ from agent.runtime.events import (
     LLM_RESPONSE_COMPLETED,
     SESSION_SUMMARY,
     SHELL_EXECUTION_COMPLETED,
+    VERIFY_EXECUTION_COMPLETED,
+    VERIFY_EXECUTION_REJECTED,
+    VERIFY_EXECUTION_REQUESTED,
     TOOL_APPROVAL_COMPLETED,
     TOOL_EXECUTION_COMPLETED,
 )
@@ -512,6 +515,11 @@ class AgentLLMTests(unittest.TestCase):
             self.assertEqual(response.message, 'Verification completed.')
             self.assertEqual(shell_runner.argv_calls[0]['argv'], ['python', '-m', 'unittest', 'tests.test_tools'])
             self.assertEqual(shell_runner.argv_calls[0]['timeout'], 120)
+            events_path = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))[0]
+            events = _read_events(events_path)
+            event_types = {event['event_type'] for event in events}
+            self.assertIn(VERIFY_EXECUTION_REQUESTED, event_types)
+            self.assertIn(VERIFY_EXECUTION_COMPLETED, event_types)
 
     def test_llm_tool_call_format_error_retries_with_fallback_max_tokens(self):
         RetryFormatErrorLLM.has_failed_once = False
@@ -622,3 +630,43 @@ class AgentSessionSummaryOutcomeTests(unittest.TestCase):
             self.assertEqual(payload['tool_success_count'], 0)
             self.assertEqual(payload['tool_failure_count'], 1)
             self.assertEqual(payload['tool_outcome_breakdown'], {'exec': {'ok': 0, 'error': 1}})
+
+
+
+class AgentVerifyObservabilityTests(unittest.TestCase):
+    def test_verify_command_rejection_is_logged(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            llm = FakeLLM(
+                [
+                    LLMResponse(
+                        text='',
+                        tool_calls=[
+                            ToolCall(
+                                id='toolu_verify_bad_1',
+                                name='verify_command',
+                                arguments={'argv': ['python', 'script.py']},
+                            )
+                        ],
+                        stop_reason='tool_use',
+                    ),
+                    LLMResponse(text='Verification rejected.', tool_calls=[], stop_reason='end_turn'),
+                ]
+            )
+            logger = ObservabilityLogger(root / 'logs' / 'observability')
+            agent = Agent(
+                llm=llm,
+                shell_runner=FakeShellRunner(ShellResult(command='', returncode=0, stdout='', stderr='')),
+                config=AgentConfig(llm_api_key='test'),
+                workspace_root=root,
+                observability_logger=logger,
+            )
+
+            response = agent.handle('run unsupported python script')
+
+            self.assertTrue(response.ok)
+            self.assertEqual(response.message, 'Verification rejected.')
+            events_path = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))[0]
+            events = _read_events(events_path)
+            rejected = next(event for event in events if event['event_type'] == VERIFY_EXECUTION_REJECTED)
+            self.assertIn('Only python -m unittest and python -m pytest are allowed.', rejected['payload']['error'])

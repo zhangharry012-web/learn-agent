@@ -21,6 +21,7 @@ def build_tools(
     shell_runner: ShellRunner,
     enabled_tools: Optional[tuple] = None,
     config: Optional[AgentConfig] = None,
+    verify_event_logger=None,
 ) -> Dict[str, BaseTool]:
     resolved_config = config or AgentConfig()
     enabled = set(
@@ -56,6 +57,6 @@ def build_tools(
     if 'read_only_command' in enabled:
         tools['read_only_command'] = ReadOnlyCommandTool(workspace_root, shell_runner)
     if 'verify_command' in enabled:
-        tools['verify_command'] = VerifyCommandTool(workspace_root, shell_runner, resolved_config)
+        tools['verify_command'] = VerifyCommandTool(workspace_root, shell_runner, resolved_config, event_logger=verify_event_logger)
 
     return tools

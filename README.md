@@ -183,6 +183,7 @@ The JSONL stream includes clearer stage-oriented events for:
 - `tool.approval.requested` and `tool.approval.completed`
 - `tool.execution.completed`
 - `shell.execution.completed`
+- `verify.execution.requested`, `verify.execution.completed`, and `verify.execution.rejected`
 - `session.summary`
 
 Lifecycle reference:
@@ -199,6 +200,7 @@ user input
         -> llm.response.completed
         -> tool.approval.requested
         -> tool.approval.completed
+        -> verify.execution.requested / verify.execution.completed / verify.execution.rejected (only for verify_command)
         -> tool.execution.completed
         -> llm.loop_limit.exceeded (only when the loop cap is hit)
         -> command.completed
@@ -250,7 +252,14 @@ VERIFY_DEFAULT_TIMEOUT_SEC=120
 VERIFY_REQUIRE_REPO_POLICY=false
 ```
 
-A repository can define its own verification policy in `.agent/verify-policy.json`. The initial safe verification subset supports common Go, Python, and TypeScript test/lint/build flows. When a command falls outside the safe subset or does not match the repository policy, the agent must use `exec` instead.
+A repository can define its own verification policy in `.agent/verify-policy.json`. This repository now includes a starter example file at that path. The initial safe verification subset supports common Go, Python, and TypeScript test/lint/build flows. When a command falls outside the safe subset or does not match the repository policy, the agent must use `exec` instead.
+
+For `verify_command`, observability now emits:
+
+- `verify.execution.requested`: a verify run was requested and passed initial payload parsing
+- `verify.execution.completed`: a verify run matched policy and finished execution
+- `verify.execution.rejected`: a verify run was rejected before execution because validation or policy matching failed
+
 
 Useful inspection commands:
 

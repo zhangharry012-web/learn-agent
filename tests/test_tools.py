@@ -18,6 +18,11 @@ from agent.tools import (
     build_tools,
 )
 from tests.helpers import FakeShellRunner
+from agent.runtime.events import (
+    VERIFY_EXECUTION_COMPLETED,
+    VERIFY_EXECUTION_REJECTED,
+    VERIFY_EXECUTION_REQUESTED,
+)
 
 
 class ToolTests(unittest.TestCase):
@@ -364,3 +369,45 @@ class ToolTests(unittest.TestCase):
 
             self.assertFalse(result.ok)
             self.assertEqual(result.content, 'Verify command is not allowed by the repository policy.')
+
+
+
+class VerifyCommandObservabilityTests(unittest.TestCase):
+    def test_verify_command_tool_emits_requested_and_completed_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shell_runner = FakeShellRunner(
+                ShellResult(command='python -m unittest tests.test_tools', returncode=0, stdout='ok', stderr='')
+            )
+            events = []
+            tool = VerifyCommandTool(
+                root,
+                shell_runner,
+                AgentConfig(),
+                event_logger=lambda event_type, payload: events.append((event_type, dict(payload))),
+            )
+
+            result = tool.execute({'argv': ['python', '-m', 'unittest', 'tests.test_tools'], 'reason': 'validate change'})
+
+            self.assertTrue(result.ok)
+            self.assertEqual([item[0] for item in events], [VERIFY_EXECUTION_REQUESTED, VERIFY_EXECUTION_COMPLETED])
+            self.assertEqual(events[0][1]['reason'], 'validate change')
+            self.assertEqual(events[1][1]['rule_id'], 'python-unittest')
+            self.assertEqual(events[1][1]['returncode'], 0)
+
+    def test_verify_command_tool_emits_rejected_event(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            events = []
+            tool = VerifyCommandTool(
+                root,
+                FakeShellRunner(ShellResult(command='', returncode=0, stdout='', stderr='')),
+                AgentConfig(),
+                event_logger=lambda event_type, payload: events.append((event_type, dict(payload))),
+            )
+
+            result = tool.execute({'argv': ['python', 'script.py'], 'reason': 'bad verify'})
+
+            self.assertFalse(result.ok)
+            self.assertEqual([item[0] for item in events], [VERIFY_EXECUTION_REQUESTED, VERIFY_EXECUTION_REJECTED])
+            self.assertIn('Only python -m unittest and python -m pytest are allowed.', events[1][1]['error'])
