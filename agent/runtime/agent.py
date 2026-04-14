@@ -76,6 +76,9 @@ class Agent:
             'llm_call_count': 0,
             'tool_call_count': 0,
             'tool_call_breakdown': {},
+            'tool_success_count': 0,
+            'tool_failure_count': 0,
+            'tool_outcome_breakdown': {},
             'shell_command_count': 0,
             'command_count': 0,
             'summary_emitted': False,
@@ -158,7 +161,7 @@ class Agent:
             },
         )
         if response.should_exit:
-            self._log_session_summary(command=normalized, trigger='session_exit')
+            response.session_summary = self._log_session_summary(command=normalized, trigger='session_exit')
         return response
 
     def _handle_shell_turn(self, command: str) -> AgentResponse:
@@ -227,7 +230,7 @@ class Agent:
             if approved
             else ToolExecutionResult(ok=False, content='User denied tool execution.')
         )
-        self._record_tool_call(pending.tool_name)
+        self._record_tool_call(pending.tool_name, result.ok)
         self.observability.log_event(
             TOOL_EXECUTION_COMPLETED,
             self.session_id,
@@ -339,7 +342,7 @@ class Agent:
                         )
                     tool_started_at = time.perf_counter()
                     result = tool.execute(tool_input)
-                    self._record_tool_call(tool_call.name)
+                    self._record_tool_call(tool_call.name, result.ok)
                     self.observability.log_event(
                         TOOL_EXECUTION_COMPLETED,
                         self.session_id,
@@ -430,26 +433,44 @@ class Agent:
         tokens['output_tokens'] += getattr(usage, 'output_tokens', 0) or 0
         tokens['total_tokens'] += getattr(usage, 'total_tokens', 0) or 0
 
-    def _record_tool_call(self, tool_name: str) -> None:
+    def _record_tool_call(self, tool_name: str, ok: bool) -> None:
         self._session_totals['tool_call_count'] += 1
         breakdown = self._session_totals['tool_call_breakdown']
         breakdown[tool_name] = breakdown.get(tool_name, 0) + 1
+        if ok:
+            self._session_totals['tool_success_count'] += 1
+        else:
+            self._session_totals['tool_failure_count'] += 1
+        outcome_breakdown = self._session_totals['tool_outcome_breakdown']
+        stats = outcome_breakdown.setdefault(tool_name, {'ok': 0, 'error': 0})
+        if ok:
+            stats['ok'] += 1
+        else:
+            stats['error'] += 1
 
-    def _log_session_summary(self, *, command: str, trigger: str) -> None:
+    def _build_session_summary(self, *, command: str, trigger: str) -> Dict[str, Any]:
+        outcome_breakdown = {
+            name: {'ok': stats['ok'], 'error': stats['error']}
+            for name, stats in sorted(self._session_totals['tool_outcome_breakdown'].items())
+        }
+        return {
+            'trigger': trigger,
+            'command': command,
+            'command_count': self._session_totals['command_count'],
+            'llm_call_count': self._session_totals['llm_call_count'],
+            'tool_call_count': self._session_totals['tool_call_count'],
+            'tool_call_breakdown': dict(sorted(self._session_totals['tool_call_breakdown'].items())),
+            'tool_success_count': self._session_totals['tool_success_count'],
+            'tool_failure_count': self._session_totals['tool_failure_count'],
+            'tool_outcome_breakdown': outcome_breakdown,
+            'shell_command_count': self._session_totals['shell_command_count'],
+            'token_usage': dict(self._session_totals['token_usage']),
+        }
+
+    def _log_session_summary(self, *, command: str, trigger: str) -> Dict[str, Any]:
+        summary = self._build_session_summary(command=command, trigger=trigger)
         if self._session_totals['summary_emitted']:
-            return
+            return summary
         self._session_totals['summary_emitted'] = True
-        self.observability.log_event(
-            SESSION_SUMMARY,
-            self.session_id,
-            {
-                'trigger': trigger,
-                'command': command,
-                'command_count': self._session_totals['command_count'],
-                'llm_call_count': self._session_totals['llm_call_count'],
-                'tool_call_count': self._session_totals['tool_call_count'],
-                'tool_call_breakdown': dict(sorted(self._session_totals['tool_call_breakdown'].items())),
-                'shell_command_count': self._session_totals['shell_command_count'],
-                'token_usage': dict(self._session_totals['token_usage']),
-            },
-        )
+        self.observability.log_event(SESSION_SUMMARY, self.session_id, summary)
+        return summary

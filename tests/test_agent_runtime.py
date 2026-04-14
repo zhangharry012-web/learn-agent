@@ -187,7 +187,12 @@ class AgentLLMTests(unittest.TestCase):
             self.assertEqual(payload['llm_call_count'], 4)
             self.assertEqual(payload['tool_call_count'], 2)
             self.assertEqual(payload['tool_call_breakdown'], {'verify_command': 1, 'write_file': 1})
+            self.assertEqual(payload['tool_success_count'], 2)
+            self.assertEqual(payload['tool_failure_count'], 0)
+            self.assertEqual(payload['tool_outcome_breakdown'], {'verify_command': {'ok': 1, 'error': 0}, 'write_file': {'ok': 1, 'error': 0}})
             self.assertEqual(payload['token_usage']['input_tokens'], 37)
+            self.assertIsNotNone(exit_response.session_summary)
+            self.assertEqual(exit_response.session_summary['tool_success_count'], 2)
             self.assertEqual(payload['token_usage']['output_tokens'], 18)
             self.assertEqual(payload['token_usage']['total_tokens'], 55)
 
@@ -559,3 +564,61 @@ class AgentLLMTests(unittest.TestCase):
             events = _read_events(events_path)
             panic_event = next(event for event in events if event['event_type'] == LLM_PANIC)
             self.assertEqual(panic_event['payload']['error_type'], 'RuntimeError')
+
+
+
+class AgentSessionSummaryOutcomeTests(unittest.TestCase):
+    def test_session_summary_tracks_tool_success_and_failure_breakdown(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
+            root = Path(tmpdir)
+            llm = FakeLLM(
+                [
+                    LLMResponse(
+                        text='',
+                        tool_calls=[
+                            ToolCall(
+                                id='toolu_exec_1',
+                                name='exec',
+                                arguments={'command': 'pwd'},
+                            )
+                        ],
+                        stop_reason='tool_use',
+                        usage=TokenUsage(input_tokens=9, output_tokens=3, total_tokens=12),
+                    ),
+                    LLMResponse(
+                        text='Command denied.',
+                        tool_calls=[],
+                        stop_reason='end_turn',
+                        usage=TokenUsage(input_tokens=4, output_tokens=2, total_tokens=6),
+                    ),
+                ]
+            )
+            logger = ObservabilityLogger(root / 'logs' / 'observability')
+            agent = Agent(
+                llm=llm,
+                shell_runner=FakeShellRunner(ShellResult(command='pwd', returncode=0, stdout='/tmp/work', stderr='')),
+                config=AgentConfig(llm_api_key='test'),
+                workspace_root=root,
+                observability_logger=logger,
+            )
+
+            first = agent.handle('run pwd')
+            second = agent.handle('no')
+            exit_response = agent.handle('exit')
+
+            self.assertTrue(first.awaiting_confirmation)
+            self.assertTrue(second.ok)
+            self.assertTrue(exit_response.should_exit)
+            self.assertEqual(exit_response.session_summary['tool_call_count'], 1)
+            self.assertEqual(exit_response.session_summary['tool_success_count'], 0)
+            self.assertEqual(exit_response.session_summary['tool_failure_count'], 1)
+            self.assertEqual(exit_response.session_summary['tool_outcome_breakdown'], {'exec': {'ok': 0, 'error': 1}})
+            self.assertEqual(exit_response.session_summary['token_usage']['total_tokens'], 18)
+
+            events_path = sorted((root / 'logs' / 'observability' / 'events').rglob('*.jsonl'))[0]
+            events = _read_events(events_path)
+            summary_event = next(event for event in events if event['event_type'] == SESSION_SUMMARY)
+            payload = summary_event['payload']
+            self.assertEqual(payload['tool_success_count'], 0)
+            self.assertEqual(payload['tool_failure_count'], 1)
+            self.assertEqual(payload['tool_outcome_breakdown'], {'exec': {'ok': 0, 'error': 1}})

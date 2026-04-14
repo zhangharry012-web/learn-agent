@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -14,6 +14,7 @@ class AgentResponse:
     message: str = ''
     should_exit: bool = False
     awaiting_confirmation: bool = False
+    session_summary: Optional[Dict[str, Any]] = None
 
 
 @dataclass

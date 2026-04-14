@@ -216,7 +216,7 @@ Turn boundaries vs. inner stages:
 - `command.received` and `command.completed` describe the outer lifecycle of one user turn.
 - `llm.response.completed`, `tool.*`, `shell.execution.completed`, and `command.blocked` describe intermediate stages inside that turn.
 - One user turn can contain multiple `llm.response.completed` or `tool.execution.completed` events, but it still starts with `command.received` and ends with `command.completed`.
-- `session.summary` is emitted once per session when the user closes the session with `exit` or `quit`.
+- `session.summary` is emitted once per session when the user closes the session with `exit` or `quit`, and the final summary is also attached to the returned `AgentResponse.session_summary`.
 
 `session.summary` currently includes:
 
@@ -224,6 +224,9 @@ Turn boundaries vs. inner stages:
 - `llm_call_count`
 - `tool_call_count`
 - `tool_call_breakdown`
+- `tool_success_count`
+- `tool_failure_count`
+- `tool_outcome_breakdown`
 - `shell_command_count`
 - `token_usage.input_tokens`
 - `token_usage.output_tokens`
