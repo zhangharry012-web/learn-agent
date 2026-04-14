@@ -8,7 +8,7 @@ from agent.shell import ShellRunner
 from agent.tools.base import BaseTool
 from agent.tools.exec_tool import ExecTool
 from agent.tools.file_tools import EditFileTool, ReadFileTool, WriteFileTool
-from agent.tools.git_inspect_tool import GitInspectTool
+
 from agent.tools.inspect_tool import InspectPathTool
 from agent.tools.read_only_command_tool import ReadOnlyCommandTool
 from agent.tools.verify_command_tool import VerifyCommandTool
@@ -29,7 +29,7 @@ def build_tools(
             'read_file',
             'write_file',
             'edit_file',
-            'git_inspect',
+
             'exec',
             'inspect_path',
             'read_only_command',
@@ -44,8 +44,7 @@ def build_tools(
         tools['write_file'] = WriteFileTool(workspace_root)
     if 'edit_file' in enabled:
         tools['edit_file'] = EditFileTool(workspace_root)
-    if 'git_inspect' in enabled:
-        tools['git_inspect'] = GitInspectTool(workspace_root, shell_runner)
+
     if 'exec' in enabled:
         tools['exec'] = ExecTool(workspace_root, shell_runner)
     if 'inspect_path' in enabled:

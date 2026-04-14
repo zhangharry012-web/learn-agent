@@ -28,7 +28,7 @@ def main() -> int:
         print(
             'LLM enabled '
             f'(provider={agent.config.llm_provider}, model={agent.config.llm_model}, base_url={base_url_enabled}) '
-            'with read_file, write_file, edit_file, exec, and git_inspect tools.'
+            'with read_file, write_file, edit_file, and exec tools.'
         )
     while True:
         try:

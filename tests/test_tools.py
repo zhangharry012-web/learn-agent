@@ -8,7 +8,6 @@ from agent.shell import ShellResult
 from agent.tools import (
     EditFileTool,
     ExecTool,
-    GitInspectTool,
     InspectPathTool,
     ReadFileTool,
     ReadOnlyCommandTool,
@@ -121,7 +120,6 @@ class ToolTests(unittest.TestCase):
                     'read_file',
                     'write_file',
                     'edit_file',
-                    'git_inspect',
                     'exec',
                     'inspect_path',
                     'read_only_command',
@@ -200,29 +198,6 @@ class ToolTests(unittest.TestCase):
             payload = json.loads(result.content)
             self.assertEqual(payload['stdout'], '.')
             self.assertEqual(payload['stderr'], '')
-
-    def test_git_inspect_tool_allows_status(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            shell_runner = FakeShellRunner(
-                ShellResult(command='git status --short', returncode=0, stdout='M a.py', stderr='')
-            )
-            tool = GitInspectTool(root, shell_runner)
-
-            result = tool.execute({'args': 'status --short'})
-
-            self.assertTrue(result.ok)
-            self.assertEqual(shell_runner.argv_calls[0]['argv'], ['git', 'status', '--short'])
-
-    def test_git_inspect_tool_rejects_mutating_subcommand(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            tool = GitInspectTool(root, FakeShellRunner(ShellResult(command='git add .', returncode=0, stdout='', stderr='')))
-
-            result = tool.execute({'args': 'add .'})
-
-            self.assertFalse(result.ok)
-            self.assertEqual(result.content, 'Only read-only git inspect commands are allowed.')
 
     def test_read_only_command_tool_runs_head_without_shell(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -21,7 +21,7 @@ class InspectPathTool(BaseTool):
     description = (
         'Inspect workspace layout with a small set of safe read-only path actions. '
         'Use this tool for pwd, ls, find, and du style directory inspection. '
-        'Do not use it for file contents because read_file is the correct tool, and do not use it for git state because git_inspect is the correct tool. '
+        'Do not use it for file contents because read_file is the correct tool. '
         'This tool does not require human approval.'
     )
     input_schema = {

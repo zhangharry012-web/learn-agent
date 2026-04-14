@@ -23,8 +23,7 @@ class ReadOnlyCommandTool(BaseTool):
         'Run a very small read-only non-git command subset inside the workspace without human approval. '
         'Use this tool for file metadata or lightweight summaries such as head, tail, wc, stat, and file. '
         'Do not use it for full file contents because read_file is the correct tool for cat-style reading. '
-        'Do not use it for workspace layout because inspect_path is the correct tool. '
-        'Do not use it for repository inspection because git_inspect is the correct tool.'
+        'Do not use it for workspace layout because inspect_path is the correct tool.'
     )
     input_schema = {
         'type': 'object',

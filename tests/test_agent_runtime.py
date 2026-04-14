@@ -417,36 +417,6 @@ class AgentLLMTests(unittest.TestCase):
             self.assertEqual(response.message, 'Write rejected.')
             self.assertFalse((root.parent / 'escape.txt').exists())
 
-    def test_git_inspect_executes_without_approval(self):
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
-            root = Path(tmpdir)
-            shell_runner = FakeShellRunner(ShellResult(command='git status --short', returncode=0, stdout='M README.md', stderr=''))
-            llm = FakeLLM(
-                [
-                    LLMResponse(
-                        text='',
-                        tool_calls=[ToolCall(id='toolu_git_inspect_1', name='git_inspect', arguments={'args': 'status --short'})],
-                        stop_reason='tool_use',
-                    ),
-                    LLMResponse(text='Repository inspected.', tool_calls=[], stop_reason='end_turn'),
-                ]
-            )
-            logger = ObservabilityLogger(root / 'logs' / 'observability')
-            agent = Agent(
-                llm=llm,
-                shell_runner=shell_runner,
-                config=AgentConfig(llm_api_key='test'),
-                workspace_root=root,
-                observability_logger=logger,
-            )
-
-            response = agent.handle('show me git status')
-
-            self.assertTrue(response.ok)
-            self.assertFalse(response.awaiting_confirmation)
-            self.assertEqual(response.message, 'Repository inspected.')
-            self.assertEqual(shell_runner.argv_calls[0]['argv'], ['git', 'status', '--short'])
-
     def test_read_only_command_executes_without_approval(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
             root = Path(tmpdir)
