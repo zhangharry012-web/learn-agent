@@ -418,7 +418,7 @@ class AgentLLMTests(unittest.TestCase):
             self.assertEqual(response.message, 'Write rejected.')
             self.assertFalse((root.parent / 'escape.txt').exists())
 
-    def test_read_only_command_executes_without_approval(self):
+    def test_inspect_path_file_metadata_executes_without_approval(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:
             root = Path(tmpdir)
             (root / 'README.md').write_text('alpha\nbeta\n', encoding='utf-8')
@@ -427,7 +427,7 @@ class AgentLLMTests(unittest.TestCase):
                 [
                     LLMResponse(
                         text='',
-                        tool_calls=[ToolCall(id='toolu_read_only_1', name='read_only_command', arguments={'args': 'wc -l README.md'})],
+                        tool_calls=[ToolCall(id='toolu_inspect_wc_1', name='inspect_path', arguments={'action': 'wc', 'path': 'README.md', 'args': '-l'})],
                         stop_reason='tool_use',
                     ),
                     LLMResponse(text='File summary inspected.', tool_calls=[], stop_reason='end_turn'),
@@ -447,7 +447,7 @@ class AgentLLMTests(unittest.TestCase):
             self.assertTrue(response.ok)
             self.assertFalse(response.awaiting_confirmation)
             self.assertEqual(response.message, 'File summary inspected.')
-            self.assertEqual(shell_runner.argv_calls[0]['argv'], ['wc', '-l', 'README.md'])
+            self.assertEqual(shell_runner.argv_calls[0]['argv'], ['wc', '-l', str(root / 'README.md')])
 
     def test_verify_command_executes_without_approval(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmpdir:

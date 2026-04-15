@@ -12,9 +12,7 @@ class ReadFileTool(BaseTool):
     name = 'read_file'
     description = (
         'Read UTF-8 text file contents from the current workspace. '
-        'Use this tool whenever you need the contents of a specific file, including cat/head/tail style tasks. '
-        'Prefer start_line and end_line instead of shell commands when you only need part of a file. '
-        'This tool is read-only, does not require human approval, and is restricted to the project root.'
+        'Supports optional start_line and end_line for partial reads.'
     )
     input_schema = {
         'type': 'object',
@@ -57,10 +55,8 @@ class ReadFileTool(BaseTool):
 class WriteFileTool(BaseTool):
     name = 'write_file'
     description = (
-        'Write text to a local file in the current workspace, or delete a file. Use this tool only when the user '
-        'explicitly wants file content created, modified, or removed. This tool executes immediately '
-        'inside the project root and never writes outside that root. The mode can be overwrite, append, or delete. '
-        'Use mode=delete to remove temporary or generated files without needing exec approval.'
+        'Write text to a file in the current workspace, or delete a file. '
+        'Supports overwrite, append, and delete modes.'
     )
     input_schema = {
         'type': 'object',
@@ -129,9 +125,8 @@ class WriteFileTool(BaseTool):
 class EditFileTool(BaseTool):
     name = 'edit_file'
     description = (
-        'Edit an existing local text file in the current workspace by replacing exact text. '
-        'Use this tool for focused in-place updates instead of full rewrites when the change '
-        'is a clear search-and-replace. This tool executes immediately and is restricted to the project root.'
+        'Edit an existing text file by replacing exact text. '
+        'Use for focused in-place updates instead of full rewrites.'
     )
     input_schema = {
         'type': 'object',

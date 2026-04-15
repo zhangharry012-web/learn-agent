@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 from typing import Any, List, Mapping
 
@@ -9,20 +10,22 @@ from agent.tools.base import BaseTool
 from agent.tools.types import ToolExecutionResult
 
 
-ALLOWED_INSPECT_ACTIONS = ('pwd', 'ls', 'find', 'du')
+ALLOWED_INSPECT_ACTIONS = ('pwd', 'ls', 'find', 'du', 'head', 'tail', 'wc', 'stat', 'file')
 DEFAULT_FIND_MAX_DEPTH = 3
 DEFAULT_LS_MAX_ENTRIES = 200
 DEFAULT_FIND_MAX_ENTRIES = 200
 DEFAULT_DU_MAX_ENTRIES = 200
+MAX_OUTPUT_LINES = 200
+HEAD_TAIL_COMMANDS = {'head', 'tail'}
+WC_ALLOWED_FLAGS = {'-l', '-c', '-w'}
 
 
 class InspectPathTool(BaseTool):
     name = 'inspect_path'
     description = (
-        'Inspect workspace layout with a small set of safe read-only path actions. '
-        'Use this tool for pwd, ls, find, and du style directory inspection. '
-        'Do not use it for file contents because read_file is the correct tool. '
-        'This tool does not require human approval.'
+        'Safe read-only workspace inspection. Supports directory layout (pwd, ls, find, du) '
+        'and lightweight file metadata (head, tail, wc, stat, file). '
+        'No human approval required.'
     )
     input_schema = {
         'type': 'object',
@@ -30,11 +33,18 @@ class InspectPathTool(BaseTool):
             'action': {
                 'type': 'string',
                 'enum': list(ALLOWED_INSPECT_ACTIONS),
-                'description': 'Read-only inspection action to run: pwd, ls, find, or du.',
+                'description': 'Action to run: pwd, ls, find, du for layout; head, tail, wc, stat, file for file metadata.',
             },
             'path': {
                 'type': 'string',
-                'description': 'Optional relative path inside the workspace. Defaults to the workspace root.',
+                'description': 'Relative path inside the workspace. For head/tail/wc/stat/file this is the target file.',
+            },
+            'args': {
+                'type': 'string',
+                'description': (
+                    'Extra arguments for head/tail/wc (e.g. "-n 20" for head/tail, "-l" for wc). '
+                    'Ignored for other actions.'
+                ),
             },
             'include_hidden': {
                 'type': 'boolean',
@@ -63,6 +73,12 @@ class InspectPathTool(BaseTool):
                 return ToolExecutionResult(ok=False, content='Unsupported inspect action.')
             if action == 'pwd':
                 return self._run_pwd()
+            if action in HEAD_TAIL_COMMANDS:
+                return self._run_head_tail(action, payload)
+            if action == 'wc':
+                return self._run_wc(payload)
+            if action in ('stat', 'file'):
+                return self._run_stat_file(action, payload)
             target = self._resolve_target(payload)
             if action == 'ls':
                 return self._run_ls(target, payload)
@@ -71,6 +87,8 @@ class InspectPathTool(BaseTool):
             return self._run_du(target, payload)
         except Exception as exc:
             return ToolExecutionResult(ok=False, content=str(exc))
+
+    # --- Directory inspection actions ---
 
     def _resolve_target(self, payload: Mapping[str, Any]) -> Path:
         raw_path = str(payload.get('path') or '.')
@@ -131,6 +149,86 @@ class InspectPathTool(BaseTool):
                 'stderr': result.stderr,
             },
         )
+
+    # --- File metadata actions (merged from read_only_command) ---
+
+    def _run_head_tail(self, action: str, payload: Mapping[str, Any]) -> ToolExecutionResult:
+        path = self._resolve_file(payload)
+        argv = [action]
+        extra_args = self._parse_extra_args(payload)
+        line_count = None
+        idx = 0
+        while idx < len(extra_args):
+            arg = extra_args[idx]
+            if arg == '-n':
+                idx += 1
+                if idx >= len(extra_args):
+                    return ToolExecutionResult(ok=False, content='Expected a line count after -n.')
+                try:
+                    line_count = int(extra_args[idx])
+                except ValueError:
+                    return ToolExecutionResult(ok=False, content='Head/tail line count must be an integer.')
+                if line_count <= 0:
+                    return ToolExecutionResult(ok=False, content='Head/tail line count must be positive.')
+                if line_count > MAX_OUTPUT_LINES:
+                    return ToolExecutionResult(ok=False, content=f'Head/tail line count must be at most {MAX_OUTPUT_LINES}.')
+                argv.extend(['-n', str(line_count)])
+            elif arg.startswith('-'):
+                return ToolExecutionResult(ok=False, content='Only the -n option is allowed for head/tail.')
+            idx += 1
+        argv.append(str(path))
+        result = self.shell_runner.run_argv(argv, cwd=self.workspace_root)
+        return self._command_result(result)
+
+    def _run_wc(self, payload: Mapping[str, Any]) -> ToolExecutionResult:
+        path = self._resolve_file(payload)
+        argv = ['wc']
+        extra_args = self._parse_extra_args(payload)
+        for arg in extra_args:
+            if arg.startswith('-'):
+                if arg not in WC_ALLOWED_FLAGS:
+                    return ToolExecutionResult(ok=False, content='Only -l, -w, or -c are allowed for wc.')
+                argv.append(arg)
+        argv.append(str(path))
+        result = self.shell_runner.run_argv(argv, cwd=self.workspace_root)
+        return self._command_result(result)
+
+    def _run_stat_file(self, action: str, payload: Mapping[str, Any]) -> ToolExecutionResult:
+        raw_path = str(payload.get('path') or '')
+        if not raw_path:
+            return ToolExecutionResult(ok=False, content=f'{action} requires a target path.')
+        self.resolve_path(raw_path)  # validates path within workspace
+        argv = [action, raw_path]
+        result = self.shell_runner.run_argv(argv, cwd=self.workspace_root)
+        return self._command_result(result)
+
+    def _resolve_file(self, payload: Mapping[str, Any]) -> Path:
+        raw_path = str(payload.get('path') or '')
+        if not raw_path:
+            raise ValueError('A target file path is required.')
+        path = self.resolve_path(raw_path)
+        if not path.exists():
+            raise ValueError('Target path does not exist.')
+        if not path.is_file():
+            raise ValueError('Target path must be a file.')
+        return path
+
+    def _parse_extra_args(self, payload: Mapping[str, Any]) -> list[str]:
+        raw = str(payload.get('args') or '')
+        if not raw.strip():
+            return []
+        return shlex.split(raw)
+
+    def _command_result(self, result: Any) -> ToolExecutionResult:
+        output = {
+            'command': result.command,
+            'returncode': result.returncode,
+            'stdout': result.stdout.rstrip('\n'),
+            'stderr': result.stderr,
+        }
+        return ToolExecutionResult(ok=result.ok, content=json.dumps(output, ensure_ascii=False))
+
+    # --- Shared helpers ---
 
     def _bounded_depth(self, raw_depth: Any) -> int:
         if raw_depth is None:

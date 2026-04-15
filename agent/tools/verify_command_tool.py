@@ -31,9 +31,8 @@ VerifyEventLogger = Callable[[str, Mapping[str, Any]], None]
 class VerifyCommandTool(BaseTool):
     name = 'verify_command'
     description = (
-        'Execute a narrow set of verification, test, lint, and build commands inside the current workspace without human approval. '
-        'Use this tool after modifying code when the goal is to validate the change safely. '
-        'Do not use it for arbitrary shell commands, dependency installation, publishing, deployment, network access, or custom script execution outside the approved verification subset.'
+        'Execute a narrow set of test, lint, and build commands inside the current workspace without human approval. '
+        'Use after modifying code to validate the change.'
     )
     input_schema = {
         'type': 'object',

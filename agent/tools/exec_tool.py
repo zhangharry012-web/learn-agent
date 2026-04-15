@@ -12,12 +12,8 @@ from agent.tools.types import ToolExecutionResult
 class ExecTool(BaseTool):
     name = 'exec'
     description = (
-        'Execute an arbitrary shell command directly inside the current workspace. '
-        'Use this only for commands that are not covered by the narrower tools. '
-        'Do not use it for file reading because read_file is the correct tool. '
-        'Do not use it for directory listing (pwd/ls/find/du) because inspect_path is the correct tool. '
-        'Do not use it for test/lint/build because verify_command is the correct tool. '
-        'This tool always requires human approval before execution.'
+        'Execute an arbitrary shell command inside the current workspace. '
+        'Requires human approval before execution.'
     )
     requires_approval = True
     input_schema = {
