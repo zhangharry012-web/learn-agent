@@ -10,7 +10,6 @@ from agent.tools import (
     ExecTool,
     InspectPathTool,
     ReadFileTool,
-    ReadOnlyCommandTool,
     VerifyCommandTool,
     WriteFileTool,
     build_tools,
@@ -122,7 +121,6 @@ class ToolTests(unittest.TestCase):
                     'edit_file',
                     'exec',
                     'inspect_path',
-                    'read_only_command',
                     'verify_command',
                 },
             )
@@ -224,7 +222,7 @@ class ToolTests(unittest.TestCase):
             self.assertEqual(payload['stdout'], '.')
             self.assertEqual(payload['stderr'], '')
 
-    def test_read_only_command_tool_runs_head_without_shell(self):
+    def test_inspect_path_tool_runs_head_via_action(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             target = root / 'notes.txt'
@@ -232,35 +230,38 @@ class ToolTests(unittest.TestCase):
             shell_runner = FakeShellRunner(
                 ShellResult(command='head -n 2 notes.txt', returncode=0, stdout='alpha\nbeta\n', stderr='')
             )
-            tool = ReadOnlyCommandTool(root, shell_runner)
+            tool = InspectPathTool(root, shell_runner)
 
-            result = tool.execute({'args': 'head -n 2 notes.txt'})
+            result = tool.execute({'action': 'head', 'path': 'notes.txt', 'args': '-n 2'})
 
             self.assertTrue(result.ok)
-            self.assertEqual(shell_runner.argv_calls[0]['argv'], ['head', '-n', '2', 'notes.txt'])
+            self.assertEqual(shell_runner.argv_calls[0]['argv'], ['head', '-n', '2', str(root / 'notes.txt')])
             payload = json.loads(result.content)
             self.assertEqual(payload['stdout'], 'alpha\nbeta')
 
-    def test_read_only_command_tool_rejects_cat(self):
+    def test_inspect_path_tool_runs_wc_via_action(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / 'notes.txt').write_text('alpha\n', encoding='utf-8')
-            tool = ReadOnlyCommandTool(
-                root,
-                FakeShellRunner(ShellResult(command='cat notes.txt', returncode=0, stdout='alpha\n', stderr='')),
+            target = root / 'notes.txt'
+            target.write_text('alpha\nbeta\n', encoding='utf-8')
+            shell_runner = FakeShellRunner(
+                ShellResult(command='wc -l notes.txt', returncode=0, stdout='2 notes.txt\n', stderr='')
             )
+            tool = InspectPathTool(root, shell_runner)
 
-            result = tool.execute({'args': 'cat notes.txt'})
+            result = tool.execute({'action': 'wc', 'path': 'notes.txt', 'args': '-l'})
 
-            self.assertFalse(result.ok)
-            self.assertEqual(result.content, 'Use read_file for direct file contents instead of cat.')
+            self.assertTrue(result.ok)
+            self.assertEqual(shell_runner.argv_calls[0]['argv'], ['wc', '-l', str(root / 'notes.txt')])
+            payload = json.loads(result.content)
+            self.assertEqual(payload['stdout'], '2 notes.txt')
 
-    def test_read_only_command_tool_rejects_path_escape(self):
+    def test_inspect_path_tool_stat_rejects_path_escape(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            tool = ReadOnlyCommandTool(root, FakeShellRunner(ShellResult(command='stat ../escape.txt', returncode=0, stdout='', stderr='')))
+            tool = InspectPathTool(root, FakeShellRunner(ShellResult(command='stat ../escape.txt', returncode=0, stdout='', stderr='')))
 
-            result = tool.execute({'args': 'stat ../escape.txt'})
+            result = tool.execute({'action': 'stat', 'path': '../escape.txt'})
 
             self.assertFalse(result.ok)
             self.assertEqual(result.content, 'Path escapes the workspace root.')
